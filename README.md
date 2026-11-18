@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/icon/icon-256.png" width="128" alt="NeoGuitar"></p>
+
 # NeoGuitar
 
 Lector, visor y reproductor de tablaturas **Guitar Pro** escrito en Rust, con interfaz en [egui](https://github.com/emilk/egui).

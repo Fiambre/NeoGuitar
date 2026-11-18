@@ -33,6 +33,7 @@ PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 ChangesAssociations=yes
 UninstallDisplayIcon={app}\{#AppExe}
+SetupIconFile=..\assets\icon\neoguitar.ico
 
 [Languages]
 Name: "spanish"; MessagesFile: "compiler:Languages\Spanish.isl"
