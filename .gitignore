@@ -1,0 +1,8 @@
+/target
+# Tablaturas descargadas (derechos de autor de terceros) y SoundFonts pesados: no se publican.
+/samples/*.gp
+/samples/*.gp3
+/samples/*.gp4
+/samples/*.gp5
+/samples/*.gpx
+/soundfonts/*.sf2
