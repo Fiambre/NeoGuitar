@@ -10,6 +10,7 @@ Lector, visor y reproductor de tablaturas **Guitar Pro** escrito en Rust, con in
 - **Tablatura y pentagrama** (notación estándar con la fuente Bravura): ligaduras, plicas y barras, silencios, armadura, acordes con diagrama y letra.
 - **Técnicas expresivas:** bends, barra de trémolo, slides, hammer-on/pull-off, vibrato, armónicos, trinos, notas de adorno, tremolo picking, notas muertas y ligadas.
 - **Reproducción** con un SoundFont (`.sf2`): repeticiones y finales alternativos, cambios de tempo, swing, pitch bend, solo/silenciar y volumen por pista, metrónomo, cuenta regresiva, bucle de compases, velocidad ajustable y **entrenador de velocidad** (sube el tempo en cada vuelta del bucle).
+- **Transposición** del sonido (±12 semitonos) y **mezclador por pista** (instrumento, paneo, reverb).
 - **Vista multipista:** varias pistas a la vez en el mismo sistema.
 - **Mástil virtual:** muestra en el brazo de la guitarra las notas que suenan.
 - **Secciones:** salto rápido a Intro, Verso, Coro… según los marcadores del archivo.

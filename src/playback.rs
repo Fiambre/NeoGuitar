@@ -13,6 +13,10 @@ use std::sync::Arc;
 
 /// Valor de `Event::track` para los clics del metrónomo.
 pub const METRONOME_TRACK: u8 = 250;
+/// Valor de la mezcla que significa "sin cambios".
+pub const MIX_FILE: u8 = 255;
+/// Envío de reverb predeterminado del sintetizador.
+pub const DEFAULT_REVERB: u8 = 40;
 const BEND_CENTER: i32 = 8192;
 /// Rango de pitch bend configurado en los canales (semitonos hacia cada lado).
 const BEND_RANGE: f32 = 12.0;
@@ -69,6 +73,8 @@ pub struct Timeline {
     /// Mensajes MIDI (canal, comando, dato1, dato2) a aplicar antes de empezar.
     pub setup: Vec<(u8, u8, u8, u8)>,
     pub total: f64,
+    /// Canal MIDI principal de cada pista.
+    pub channels: Vec<u8>,
 }
 
 /// Orden de reproducción de los compases con repeticiones y finales alternativos.
@@ -236,6 +242,7 @@ impl Timeline {
                 tl.setup.push((ch, 0xB0, 10, t.pan.min(127)));
             }
         }
+        tl.channels = channels.clone();
         if let Some(t) = song.tracks.iter().find(|t| t.is_percussion) {
             tl.setup.push((9, 0xB0, 7, t.volume.min(127)));
             tl.setup.push((9, 0xB0, 10, t.pan.min(127)));
@@ -488,6 +495,27 @@ impl Timeline {
     }
 
     /// Compás y tick absoluto de la partitura que suenan en el instante `t`.
+    /// Copia con todas las notas (salvo la percusión y el metrónomo) desplazadas `semitones` semitonos.
+    pub fn transposed(&self, semitones: i32) -> Timeline {
+        let shift = |key: u8| (key as i32 + semitones).clamp(0, 127) as u8;
+        let events = self
+            .events
+            .iter()
+            .map(|e| {
+                let mut e = *e;
+                if e.channel != 9 && e.track != METRONOME_TRACK {
+                    e.kind = match e.kind {
+                        Kind::NoteOn { key, velocity } => Kind::NoteOn { key: shift(key), velocity },
+                        Kind::NoteOff { key } => Kind::NoteOff { key: shift(key) },
+                        other => other,
+                    };
+                }
+                e
+            })
+            .collect();
+        Timeline { events, segs: self.segs.clone(), setup: self.setup.clone(), total: self.total, channels: self.channels.clone() }
+    }
+
     pub fn position(&self, t: f64) -> Option<(usize, u64)> {
         let i = self.segs.partition_point(|s| s.t1 <= t).min(self.segs.len().checked_sub(1)?);
         let s = &self.segs[i];
@@ -725,6 +753,8 @@ fn emit_note(s: &Spec, pool: &mut ChannelPool, out: &mut Vec<Event>) {
 
 pub enum Cmd {
     SetTimeline(Arc<Timeline>),
+    /// Cambia la línea de tiempo sin mover la posición ni detener la reproducción (p. ej. al transponer).
+    ReplaceTimeline(Arc<Timeline>),
     Play,
     /// Empieza tras `beats` clics separados por `beat_secs` segundos de la canción.
     PlayCountIn { beats: u32, beat_secs: f64 },
@@ -754,6 +784,10 @@ pub struct Shared {
     pub trainer_on: AtomicBool,
     pub trainer_step: AtomicU32,
     pub trainer_max: AtomicU32,
+    /// Mezcla por pista; 255 = el valor del archivo (o el predeterminado, en el reverb).
+    pub mix_pan: Vec<AtomicU8>,
+    pub mix_program: Vec<AtomicU8>,
+    pub mix_reverb: Vec<AtomicU8>,
 }
 
 impl Default for Shared {
@@ -771,6 +805,9 @@ impl Default for Shared {
             trainer_on: AtomicBool::new(false),
             trainer_step: AtomicU32::new(5),
             trainer_max: AtomicU32::new(100),
+            mix_pan: (0..64).map(|_| AtomicU8::new(MIX_FILE)).collect(),
+            mix_program: (0..64).map(|_| AtomicU8::new(MIX_FILE)).collect(),
+            mix_reverb: (0..64).map(|_| AtomicU8::new(MIX_FILE)).collect(),
         }
     }
 }
@@ -801,6 +838,8 @@ pub struct Engine {
     playing: bool,
     speed: f64,
     lead: Option<Lead>,
+    /// Última mezcla (pan, programa, reverb) enviada al sintetizador por pista.
+    applied: Vec<[u8; 3]>,
 }
 
 /// Cuenta regresiva en curso.
@@ -830,6 +869,7 @@ impl Engine {
             playing: false,
             speed: 1.0,
             lead: None,
+            applied: vec![[MIX_FILE; 3]; 64],
         })
     }
 
@@ -838,6 +878,56 @@ impl Engine {
         self.synth.note_off_all(immediate);
         for ch in 0..16 {
             self.synth.process_midi_message(ch, 0xE0, 0, 64);
+        }
+    }
+
+    /// Envía la configuración inicial de los canales (programa, volumen, pan) y restablece la mezcla aplicada.
+    fn apply_setup(&mut self) {
+        for ch in 0..16 {
+            self.synth.process_midi_message(ch, 0xB0, 91, DEFAULT_REVERB as i32);
+        }
+        for &(ch, cmd, d1, d2) in &self.timeline.setup {
+            self.synth.process_midi_message(ch as i32, cmd as i32, d1 as i32, d2 as i32);
+        }
+        // La próxima sincronización vuelve a aplicar lo que el usuario haya cambiado.
+        self.applied = vec![[MIX_FILE; 3]; 64];
+    }
+
+    /// Valor del archivo para un canal (de la configuración inicial).
+    fn file_value(&self, ch: u8, cmd: u8, cc: u8) -> Option<u8> {
+        self.timeline.setup.iter().find(|&&(c, k, d1, _)| c == ch && k == cmd && (cmd == 0xC0 || d1 == cc)).map(|&(_, _, d1, d2)| if cmd == 0xC0 { d1 } else { d2 })
+    }
+
+    /// Aplica los cambios de mezcla (instrumento, paneo, reverb) hechos desde la interfaz.
+    fn sync_mix(&mut self) {
+        let n = self.timeline.channels.len().min(64);
+        for t in 0..n {
+            let cur = [
+                self.shared.mix_pan[t].load(Ordering::Relaxed),
+                self.shared.mix_program[t].load(Ordering::Relaxed),
+                self.shared.mix_reverb[t].load(Ordering::Relaxed),
+            ];
+            if cur == self.applied[t] {
+                continue;
+            }
+            let ch = self.timeline.channels[t];
+            if cur[0] != self.applied[t][0] {
+                let v = if cur[0] != MIX_FILE { Some(cur[0]) } else { self.file_value(ch, 0xB0, 10) };
+                if let Some(v) = v {
+                    self.synth.process_midi_message(ch as i32, 0xB0, 10, v as i32);
+                }
+            }
+            if cur[1] != self.applied[t][1] && ch != 9 {
+                let v = if cur[1] != MIX_FILE { Some(cur[1]) } else { self.file_value(ch, 0xC0, 0) };
+                if let Some(v) = v {
+                    self.synth.process_midi_message(ch as i32, 0xC0, v as i32, 0);
+                }
+            }
+            if cur[2] != self.applied[t][2] {
+                let v = if cur[2] != MIX_FILE { cur[2] } else { DEFAULT_REVERB };
+                self.synth.process_midi_message(ch as i32, 0xB0, 91, v as i32);
+            }
+            self.applied[t] = cur;
         }
     }
 
@@ -852,12 +942,18 @@ impl Engine {
             Cmd::SetTimeline(tl) => {
                 self.timeline = tl;
                 self.silence(true);
-                for &(ch, cmd, d1, d2) in &self.timeline.setup {
-                    self.synth.process_midi_message(ch as i32, cmd as i32, d1 as i32, d2 as i32);
-                }
+                self.apply_setup();
                 self.pos = 0.0;
                 self.next = 0;
                 self.playing = false;
+            }
+            Cmd::ReplaceTimeline(tl) => {
+                let (pos, playing) = (self.pos, self.playing);
+                self.timeline = tl;
+                self.silence(true);
+                self.apply_setup();
+                self.seek_to(pos);
+                self.playing = playing;
             }
             Cmd::Play => {
                 if self.pos >= self.timeline.total {
@@ -909,9 +1005,15 @@ impl Engine {
                 }
             }
             Kind::NoteOff { key } => self.synth.note_off(ch, key as i32),
-            Kind::Program(p) => self.synth.process_midi_message(ch, 0xC0, p as i32, 0),
+            Kind::Program(p) => {
+                let over = self.shared.mix_program.get(ev.track as usize).map(|a| a.load(Ordering::Relaxed)).unwrap_or(MIX_FILE);
+                self.synth.process_midi_message(ch, 0xC0, if over != MIX_FILE { over } else { p } as i32, 0)
+            }
             Kind::Bend(v) => self.synth.process_midi_message(ch, 0xE0, (v & 0x7f) as i32, ((v >> 7) & 0x7f) as i32),
-            Kind::Control { cc, value } => self.synth.process_midi_message(ch, 0xB0, cc as i32, value as i32),
+            Kind::Control { cc, value } => {
+                let over = if cc == 10 { self.shared.mix_pan.get(ev.track as usize).map(|a| a.load(Ordering::Relaxed)).unwrap_or(MIX_FILE) } else { MIX_FILE };
+                self.synth.process_midi_message(ch, 0xB0, cc as i32, if over != MIX_FILE { over } else { value } as i32)
+            }
         }
     }
 
@@ -919,6 +1021,7 @@ impl Engine {
         while let Ok(cmd) = self.rx.try_recv() {
             self.handle(cmd);
         }
+        self.sync_mix();
         let n = left.len().min(right.len());
         let mut done = 0;
         while done < n {

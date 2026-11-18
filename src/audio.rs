@@ -1,7 +1,7 @@
 //! Salida de audio (cpal) y carga del SoundFont en segundo plano.
 
 use crate::model::Song;
-use crate::playback::{Cmd, Engine, Shared, Timeline};
+use crate::playback::{Cmd, Engine, Shared, Timeline, MIX_FILE};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use rustysynth::SoundFont;
 use std::path::{Path, PathBuf};
@@ -21,6 +21,10 @@ pub struct Player {
     pub status: Status,
     pub shared: Arc<Shared>,
     pub timeline: Arc<Timeline>,
+    /// Línea de tiempo sin transponer, de la que sale `timeline`.
+    base_timeline: Arc<Timeline>,
+    /// Transposición del sonido en semitonos (la tablatura no cambia).
+    pub transpose: i32,
     tx: Sender<Cmd>,
     loader: Option<Receiver<Result<Arc<SoundFont>, String>>>,
     stream: Option<cpal::Stream>,
@@ -42,6 +46,8 @@ impl Player {
             status: Status::NoSoundFont,
             shared,
             timeline: Arc::new(Timeline::default()),
+            base_timeline: Arc::new(Timeline::default()),
+            transpose: 0,
             tx,
             loader: None,
             stream: None,
@@ -138,13 +144,29 @@ impl Player {
     }
 
     pub fn set_song(&mut self, song: &Song) {
-        self.timeline = Arc::new(Timeline::build(song));
+        self.base_timeline = Arc::new(Timeline::build(song));
+        self.timeline = self.base_timeline.clone();
+        self.transpose = 0;
         self.shared.mask.store(u64::MAX, Ordering::Relaxed);
         for g in &self.shared.gains {
             g.store(100, Ordering::Relaxed);
         }
+        for a in self.shared.mix_pan.iter().chain(&self.shared.mix_program).chain(&self.shared.mix_reverb) {
+            a.store(MIX_FILE, Ordering::Relaxed);
+        }
         self.clear_loop();
         self.send(Cmd::SetTimeline(self.timeline.clone()));
+    }
+
+    /// Transpone el sonido `semitones` semitonos (-12..12) sin interrumpir la reproducción.
+    pub fn set_transpose(&mut self, semitones: i32) {
+        let n = semitones.clamp(-12, 12);
+        if n == self.transpose {
+            return;
+        }
+        self.transpose = n;
+        self.timeline = if n == 0 { self.base_timeline.clone() } else { Arc::new(self.base_timeline.transposed(n)) };
+        self.send(Cmd::ReplaceTimeline(self.timeline.clone()));
     }
 
     pub fn play(&self) {
@@ -283,6 +305,37 @@ impl Player {
         if let Some(g) = self.shared.gains.get(track) {
             g.store(percent, Ordering::Relaxed);
         }
+    }
+
+    /// Deja sonar solo `track`; si ya era la única activa, vuelven todas.
+    /// Paneo (0..=127) cambiado por el usuario, si lo hay.
+    pub fn mix_pan(&self, track: usize) -> Option<u8> {
+        self.mix_value(&self.shared.mix_pan, track)
+    }
+
+    /// Instrumento (0..=127) cambiado por el usuario, si lo hay.
+    pub fn mix_program(&self, track: usize) -> Option<u8> {
+        self.mix_value(&self.shared.mix_program, track)
+    }
+
+    /// Envío de reverb (0..=127) cambiado por el usuario, si lo hay.
+    pub fn mix_reverb(&self, track: usize) -> Option<u8> {
+        self.mix_value(&self.shared.mix_reverb, track)
+    }
+
+    fn mix_value(&self, list: &[std::sync::atomic::AtomicU8], track: usize) -> Option<u8> {
+        list.get(track).map(|a| a.load(Ordering::Relaxed)).filter(|&v| v != MIX_FILE)
+    }
+
+    pub fn set_mix(&self, track: usize, pan: Option<u8>, program: Option<u8>, reverb: Option<u8>) {
+        let put = |list: &[std::sync::atomic::AtomicU8], v: Option<u8>| {
+            if let Some(a) = list.get(track) {
+                a.store(v.map(|x| x.min(127)).unwrap_or(MIX_FILE), Ordering::Relaxed);
+            }
+        };
+        put(&self.shared.mix_pan, pan);
+        put(&self.shared.mix_program, program);
+        put(&self.shared.mix_reverb, reverb);
     }
 
     /// Deja sonar solo `track`; si ya era la única activa, vuelven todas.

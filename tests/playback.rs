@@ -321,3 +321,114 @@ fn export_wav_offline() {
     assert!(peak > 1000, "el WAV quedó en silencio");
     assert!(peak <= 32767);
 }
+
+#[test]
+fn transposition_shifts_pitched_notes_only() {
+    let song = load("extra/Demo v5.gp5");
+    let tl = Timeline::build(&song);
+    let up = tl.transposed(3);
+    let down = tl.transposed(-5);
+    assert_eq!(tl.events.len(), up.events.len());
+    assert_eq!(tl.total, up.total);
+    let (mut pitched, mut drums) = (0, 0);
+    for ((a, b), c) in tl.events.iter().zip(&up.events).zip(&down.events) {
+        match (a.kind, b.kind, c.kind) {
+            (Kind::NoteOn { key: k0, velocity: v0 }, Kind::NoteOn { key: k1, velocity: v1 }, Kind::NoteOn { key: k2, .. }) => {
+                assert_eq!(v0, v1);
+                if a.channel == 9 {
+                    assert_eq!((k0, k1, k2), (k0, k0, k0), "la percusión no se transpone");
+                    drums += 1;
+                } else {
+                    assert_eq!(k1 as i32, (k0 as i32 + 3).min(127));
+                    assert_eq!(k2 as i32, (k0 as i32 - 5).max(0));
+                    pitched += 1;
+                }
+            }
+            (Kind::NoteOff { key: k0 }, Kind::NoteOff { key: k1 }, _) if a.channel != 9 => assert_eq!(k1 as i32, (k0 as i32 + 3).min(127)),
+            (x, y, _) => assert_eq!(format!("{x:?}"), format!("{y:?}")),
+        }
+    }
+    assert!(pitched > 100 && drums > 10, "melódicas {pitched}, percusión {drums}");
+}
+
+#[test]
+fn replace_timeline_keeps_position_and_playing() {
+    let sf = format!("{}/soundfonts/GeneralUser-GS.sf2", env!("CARGO_MANIFEST_DIR"));
+    let Ok(mut file) = std::fs::File::open(&sf) else {
+        eprintln!("sin SoundFont, se omite");
+        return;
+    };
+    let font = Arc::new(SoundFont::new(&mut file).unwrap());
+    let song = load("extra/Demo v5.gp5");
+    let tl = Arc::new(Timeline::build(&song));
+    let (tx, rx) = channel();
+    let shared = Arc::new(Shared::default());
+    shared.mask.store(u64::MAX, Ordering::Relaxed);
+    let mut engine = Engine::new(font, 44100, shared.clone(), rx).unwrap();
+    tx.send(Cmd::SetTimeline(tl.clone())).unwrap();
+    tx.send(Cmd::Seek(5.0)).unwrap();
+    tx.send(Cmd::Play).unwrap();
+    let (mut l, mut r) = (vec![0f32; 512], vec![0f32; 512]);
+    for _ in 0..100 {
+        engine.render(&mut l, &mut r);
+    }
+    let before = shared.position();
+    tx.send(Cmd::ReplaceTimeline(Arc::new(tl.transposed(2)))).unwrap();
+    for _ in 0..10 {
+        engine.render(&mut l, &mut r);
+    }
+    let after = shared.position();
+    assert!(before > 5.5, "la reproducción avanzó: {before}");
+    assert!(after > before && after < before + 0.5, "la posición se conserva: {before} -> {after}");
+    assert!(shared.playing.load(Ordering::Relaxed), "sigue reproduciendo");
+}
+
+#[test]
+fn live_mix_changes_pan_and_instrument() {
+    use neoguitar::playback::{Event, MIX_FILE};
+    let sf = format!("{}/soundfonts/GeneralUser-GS.sf2", env!("CARGO_MANIFEST_DIR"));
+    let Ok(mut file) = std::fs::File::open(&sf) else {
+        eprintln!("sin SoundFont, se omite");
+        return;
+    };
+    let font = Arc::new(SoundFont::new(&mut file).unwrap());
+    let song = load("extra/Demo v5.gp5");
+    let tl = Arc::new(Timeline::build(&song));
+    let track = song.tracks.iter().position(|t| !t.is_percussion).unwrap();
+    let first: &Event = tl.events.iter().find(|e| e.track as usize == track && matches!(e.kind, Kind::NoteOn { .. })).unwrap();
+    let start = (first.time - 0.05).max(0.0);
+
+    // Renderiza 2 s desde la primera nota de la pista con la mezcla indicada y devuelve (pico izq., pico der., muestras).
+    let run = |pan: u8, program: u8| -> (f32, f32, Vec<f32>) {
+        let (tx, rx) = channel();
+        let shared = Arc::new(Shared::default());
+        shared.mask.store(1u64 << track, Ordering::Relaxed);
+        shared.mix_pan[track].store(pan, Ordering::Relaxed);
+        shared.mix_program[track].store(program, Ordering::Relaxed);
+        let mut engine = Engine::new(font.clone(), 44100, shared, rx).unwrap();
+        tx.send(Cmd::SetTimeline(tl.clone())).unwrap();
+        tx.send(Cmd::Seek(start)).unwrap();
+        tx.send(Cmd::Play).unwrap();
+        let (mut l, mut r) = (vec![0f32; 512], vec![0f32; 512]);
+        let (mut pl, mut pr, mut all) = (0f32, 0f32, Vec::new());
+        for _ in 0..(44100 * 2 / 512) {
+            engine.render(&mut l, &mut r);
+            pl = l.iter().fold(pl, |m, v| m.max(v.abs()));
+            pr = r.iter().fold(pr, |m, v| m.max(v.abs()));
+            all.extend_from_slice(&l);
+        }
+        (pl, pr, all)
+    };
+    let (l0, r0, _) = run(0, MIX_FILE);
+    let (l1, r1, _) = run(127, MIX_FILE);
+    println!("pan izq: {l0:.3}/{r0:.3}  pan der: {l1:.3}/{r1:.3}");
+    assert!(l0 > 0.01 && r1 > 0.01, "debe sonar");
+    assert!(l0 > r0 * 4.0, "todo a la izquierda");
+    assert!(r1 > l1 * 4.0, "todo a la derecha");
+
+    let (_, _, a) = run(64, MIX_FILE);
+    let (_, _, b) = run(64, 40); // violín
+    let diff: f32 = a.iter().zip(&b).map(|(x, y)| (x - y).abs()).sum();
+    println!("diferencia de audio entre instrumentos: {diff:.1}");
+    assert!(diff > 5.0, "cambiar el instrumento debe cambiar el sonido");
+}

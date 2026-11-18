@@ -163,6 +163,8 @@ pub enum Icon {
     Dots,
     Headphones,
     Fretboard,
+    Transpose,
+    Sliders,
 }
 
 /// Botón con un icono dibujado. `style`: `Round` es el botón grande de reproducir.
@@ -323,6 +325,18 @@ pub fn draw_icon(p: &egui::Painter, icon: Icon, c: egui::Pos2, u: f32, fg: Color
             for x in [-1.3f32, 0.0, 1.3] {
                 p.circle_filled(pt(x, 0.0), 0.35 * u + 0.4, fg);
             }
+        }
+        Icon::Sliders => {
+            for (y, x) in [(-1.3f32, -0.8f32), (0.0, 0.9), (1.3, -0.3)] {
+                line(&[(-2.0, y), (2.0, y)]);
+                p.circle_filled(pt(x, y), 0.55 * u + 0.6, fg);
+            }
+        }
+        Icon::Transpose => {
+            line(&[(-0.9, 1.7), (-0.9, -1.7)]);
+            line(&[(-1.8, -0.8), (-0.9, -1.7), (0.0, -0.8)]);
+            line(&[(0.9, -1.7), (0.9, 1.7)]);
+            line(&[(0.0, 0.8), (0.9, 1.7), (1.8, 0.8)]);
         }
         Icon::Fretboard => {
             p.rect_stroke(egui::Rect::from_min_max(pt(-2.0, -1.5), pt(2.0, 1.5)), radius(2), st, StrokeKind::Inside);

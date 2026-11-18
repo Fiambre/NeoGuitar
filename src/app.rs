@@ -44,6 +44,8 @@ pub struct App {
     notice: Option<String>,
     /// Compás (base 1) al que desplazar la vista en el próximo frame.
     jump_to: Option<usize>,
+    /// Pista con el panel de mezcla desplegado.
+    mixer_open: Option<usize>,
 }
 
 struct ScreenshotJob {
@@ -83,6 +85,7 @@ impl App {
             export_job: None,
             notice: None,
             jump_to: None,
+            mixer_open: None,
         };
         // Se restauran los ajustes del reproductor.
         app.player.set_speed(app.settings.speed / 100.0);
@@ -98,6 +101,9 @@ impl App {
         }
         if let Some(z) = std::env::var("NEOGUITAR_ZOOM").ok().and_then(|v| v.parse::<f32>().ok()) {
             app.zoom = z.clamp(0.6, 2.0);
+        }
+        if let Some(t) = std::env::var("NEOGUITAR_MIXER").ok().and_then(|v| v.parse::<usize>().ok()) {
+            app.mixer_open = Some(t.saturating_sub(1));
         }
         if std::env::var_os("NEOGUITAR_FRETBOARD").is_some() {
             app.show_fretboard = true;
@@ -429,6 +435,37 @@ impl App {
             if theme::chip(ui, Icon::Timer, self.count_in, "Cuenta").on_hover_text("Un compás de clics antes de empezar").clicked() {
                 self.count_in = !self.count_in;
             }
+            let tone_label = match self.player.transpose {
+                0 => "Tono".to_string(),
+                n => format!("Tono {n:+}"),
+            };
+            let tone_btn = theme::icon_label(ui, Some(Icon::Transpose), &tone_label, self.player.transpose != 0, true, false);
+            egui::Popup::menu(&tone_btn).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
+                ui.set_min_width(260.0);
+                ui.label("Transponer el sonido");
+                ui.label(RichText::new("La tablatura no cambia: sirve para tocar con capo o con otra afinación.").size(12.0).color(theme::MUTED));
+                let mut n = self.player.transpose;
+                ui.spacing_mut().slider_width = 200.0;
+                let changed = ui.add(egui::Slider::new(&mut n, -12..=12).suffix(" semitonos")).changed();
+                ui.horizontal(|ui| {
+                    let mut set = changed;
+                    if ui.button("−1").clicked() {
+                        n -= 1;
+                        set = true;
+                    }
+                    if ui.button("+1").clicked() {
+                        n += 1;
+                        set = true;
+                    }
+                    if ui.add_enabled(self.player.transpose != 0, egui::Button::new("Restablecer")).clicked() {
+                        n = 0;
+                        set = true;
+                    }
+                    if set {
+                        self.player.set_transpose(n);
+                    }
+                });
+            });
             let (trainer_on, ..) = self.player.trainer();
             let trainer_btn = theme::icon_label(ui, Some(Icon::Trend), "Entrenador", trainer_on, true, false);
             egui::Popup::menu(&trainer_btn).show(|ui| {
@@ -571,7 +608,7 @@ impl eframe::App for App {
             if self.show_side {
                 egui::Panel::left("info").default_size(300.0).size_range(240.0..=460.0).frame(theme::panel_frame(egui::Margin::same(12))).show(ui, |ui| {
                     egui::ScrollArea::vertical().show(ui, |ui| {
-                        side_info(ui, song, self.path.as_deref(), &mut self.track, &self.player, &mut self.visible, self.multi, &mut self.jump_to)
+                        side_info(ui, song, self.path.as_deref(), &mut self.track, &self.player, &mut self.visible, self.multi, &mut self.jump_to, &mut self.mixer_open)
                     });
                 });
             }
@@ -674,7 +711,7 @@ fn track_label(t: &neoguitar::model::Track) -> String {
     format!("{}. {}", t.number, name)
 }
 
-fn side_info(ui: &mut egui::Ui, song: &Song, path: Option<&Path>, selected: &mut usize, player: &Player, visible: &mut [bool], multi: bool, jump: &mut Option<usize>) {
+fn side_info(ui: &mut egui::Ui, song: &Song, path: Option<&Path>, selected: &mut usize, player: &Player, visible: &mut [bool], multi: bool, jump: &mut Option<usize>, mixer_open: &mut Option<usize>) {
     theme::card().show(ui, |ui| {
         ui.set_width(ui.available_width());
         if let Some(p) = path.and_then(|p| p.file_name()) {
@@ -721,7 +758,8 @@ fn side_info(ui: &mut egui::Ui, song: &Song, path: Option<&Path>, selected: &mut
         let tuning = if t.is_percussion {
             "percusión".to_string()
         } else {
-            t.strings.iter().map(|&m| midi_note_name(m)).collect::<Vec<_>>().join(" ")
+            let notes = t.strings.iter().map(|&m| midi_note_name(m)).collect::<Vec<_>>().join(" ");
+            if t.capo > 0 { format!("{notes} · capo {}", t.capo) } else { notes }
         };
         let [r, g, b] = t.color;
         let is_sel = *selected == i;
@@ -735,7 +773,7 @@ fn side_info(ui: &mut egui::Ui, song: &Song, path: Option<&Path>, selected: &mut
             ui.horizontal(|ui| {
                 let (rect, _) = ui.allocate_exact_size(egui::vec2(4.0, 18.0), egui::Sense::hover());
                 ui.painter().rect_filled(rect, egui::CornerRadius::same(2), theme::track_color([r, g, b]));
-                let reserve = if multi { 112.0 } else { 80.0 };
+                let reserve = if multi { 144.0 } else { 112.0 };
                 let w = (ui.available_width() - reserve).max(40.0);
                 ui.allocate_ui_with_layout(egui::vec2(w, 22.0), Layout::left_to_right(Align::Center), |ui| {
                     let mut name = RichText::new(track_label(t)).size(14.0);
@@ -761,6 +799,11 @@ fn side_info(ui: &mut egui::Ui, song: &Song, path: Option<&Path>, selected: &mut
                 if theme::icon_button(ui, Icon::Headphones, 24.0, solo_style, true).on_hover_text("Solo: escuchar solo esta pista").clicked() {
                     player.toggle_solo(i, song.tracks.len());
                 }
+                let mix_on = *mixer_open == Some(i);
+                let mix_style = if mix_on { IconStyle::FlatOn } else { IconStyle::Flat };
+                if theme::icon_button(ui, Icon::Sliders, 24.0, mix_style, true).on_hover_text("Mezcla de la pista: instrumento, paneo y reverb").clicked() {
+                    *mixer_open = if mix_on { None } else { Some(i) };
+                }
                 if multi {
                     if let Some(v) = visible.get_mut(i) {
                         let style = if *v { IconStyle::FlatOn } else { IconStyle::Flat };
@@ -778,10 +821,69 @@ fn side_info(ui: &mut egui::Ui, song: &Song, path: Option<&Path>, selected: &mut
                     player.set_track_gain(i, gain as u8);
                 }
             });
+            if *mixer_open == Some(i) {
+                mixer_controls(ui, i, t, player);
+            }
         });
     }
     sections_panel(ui, song, player, jump);
     chords_panel(ui, song);
+}
+
+/// Mezcla de una pista: instrumento, paneo y envío de reverb. Los cambios suenan al instante.
+fn mixer_controls(ui: &mut egui::Ui, i: usize, t: &neoguitar::model::Track, player: &Player) {
+    ui.add_space(2.0);
+    ui.separator();
+    let (mut pan_o, mut prog_o, mut rev_o) = (player.mix_pan(i), player.mix_program(i), player.mix_reverb(i));
+    let mut changed = false;
+    let label = |ui: &mut egui::Ui, text: &str| ui.label(RichText::new(text).size(11.5).color(theme::MUTED));
+
+    if !t.is_percussion {
+        let program = prog_o.unwrap_or(t.program.clamp(0, 127) as u8) as usize;
+        label(ui, "Instrumento");
+        egui::ComboBox::from_id_salt(("instrumento", i)).width(ui.available_width() - 8.0).selected_text(neoguitar::gm::NAMES[program.min(127)]).show_ui(ui, |ui| {
+            egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
+                for (k, name) in neoguitar::gm::NAMES.iter().enumerate() {
+                    if ui.selectable_label(program == k, format!("{:>3}  {name}", k + 1)).clicked() {
+                        prog_o = Some(k as u8);
+                        changed = true;
+                    }
+                }
+            });
+        });
+    }
+
+    let mut pan = pan_o.unwrap_or(t.pan.min(127));
+    label(ui, "Paneo");
+    ui.spacing_mut().slider_width = (ui.available_width() - 110.0).max(60.0);
+    let pan_fmt = |v: f64, _: std::ops::RangeInclusive<usize>| {
+        let d = (v - 64.0).round() as i32;
+        match d {
+            -1..=1 => "Centro".to_string(),
+            d if d < 0 => format!("Izq. {}", -d * 100 / 64),
+            d => format!("Der. {}", d * 100 / 63),
+        }
+    };
+    if ui.add(egui::Slider::new(&mut pan, 0..=127).custom_formatter(pan_fmt)).changed() {
+        pan_o = Some(pan);
+        changed = true;
+    }
+
+    let mut reverb = rev_o.unwrap_or(neoguitar::playback::DEFAULT_REVERB);
+    label(ui, "Reverb");
+    if ui.add(egui::Slider::new(&mut reverb, 0..=127).custom_formatter(|v, _| format!("{:.0} %", v * 100.0 / 127.0))).changed() {
+        rev_o = Some(reverb);
+        changed = true;
+    }
+
+    let customized = pan_o.is_some() || prog_o.is_some() || rev_o.is_some();
+    if ui.add_enabled(customized, egui::Button::new("Restablecer")).on_hover_text("Volver a los valores del archivo").clicked() {
+        (pan_o, prog_o, rev_o) = (None, None, None);
+        changed = true;
+    }
+    if changed {
+        player.set_mix(i, pan_o, prog_o, rev_o);
+    }
 }
 
 /// Secciones de la canción (marcadores de compás): un clic lleva la vista y la reproducción a ese compás.
