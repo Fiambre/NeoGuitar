@@ -34,6 +34,9 @@ pub struct App {
     persist: bool,
     /// Título de ventana ya enviado al sistema.
     title: String,
+    /// Resultado de la última asociación de archivos (solo Windows).
+    #[allow(dead_code)]
+    assoc_msg: Option<String>,
 }
 
 struct ScreenshotJob {
@@ -68,6 +71,7 @@ impl App {
             settings,
             persist,
             title: String::new(),
+            assoc_msg: None,
         };
         // Se restauran los ajustes del reproductor.
         app.player.set_speed(app.settings.speed / 100.0);
@@ -276,6 +280,19 @@ impl App {
                     if ui.button("Elegir SoundFont…").clicked() {
                         self.pick_soundfont();
                         ui.close();
+                    }
+                    #[cfg(windows)]
+                    {
+                        let tip = "Abrir los archivos .gp3, .gp4, .gp5, .gpx y .gp con NeoGuitar al hacer doble clic";
+                        if ui.button("Asociar archivos Guitar Pro").on_hover_text(tip).clicked() {
+                            self.assoc_msg = Some(match crate::assoc::associate() {
+                                Ok(()) => "Archivos asociados. Si Windows sigue abriendo otro programa, elígelo en «Abrir con».".to_string(),
+                                Err(e) => format!("No se pudo asociar: {e}"),
+                            });
+                        }
+                        if let Some(m) = &self.assoc_msg {
+                            ui.weak(m);
+                        }
                     }
                     match &self.player.status {
                         Status::NoSoundFont => ui.colored_label(theme::DANGER, "Sin SoundFont (elegí un .sf2)"),

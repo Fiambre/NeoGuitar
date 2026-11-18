@@ -1,6 +1,8 @@
 #![cfg_attr(all(not(debug_assertions), target_os = "windows"), windows_subsystem = "windows")]
 
 mod app;
+#[cfg(windows)]
+mod assoc;
 mod staff;
 mod tab_view;
 mod theme;

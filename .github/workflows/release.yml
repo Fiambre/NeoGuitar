@@ -1,0 +1,72 @@
+name: Release
+
+# Al publicar una etiqueta vX.Y.Z se compila, se genera el instalador y se crea el release en GitHub.
+# También se puede lanzar a mano (workflow_dispatch): genera los archivos como artefactos, sin crear release.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Versión
+        id: ver
+        shell: pwsh
+        run: |
+          if ("${{ github.ref_type }}" -eq "tag") { $v = "${{ github.ref_name }}".TrimStart("v") }
+          else { $v = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value }
+          "version=$v" >> $env:GITHUB_OUTPUT
+
+      - name: Pruebas
+        run: cargo test --release
+
+      - name: Compilar
+        run: cargo build --release
+
+      - name: Instalar Inno Setup
+        shell: pwsh
+        run: |
+          if (-not (Get-Command iscc -ErrorAction SilentlyContinue)) { choco install innosetup -y --no-progress }
+
+      - name: Generar instalador
+        shell: pwsh
+        run: |
+          $iscc = (Get-Command iscc -ErrorAction SilentlyContinue).Source
+          if (-not $iscc) { $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
+          & $iscc "/DAppVersion=${{ steps.ver.outputs.version }}" installer\neoguitar.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC falló" }
+
+      - name: Versión portable (zip)
+        shell: pwsh
+        run: |
+          $dir = "dist\NeoGuitar-${{ steps.ver.outputs.version }}-portable"
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          Copy-Item target\release\neoguitar.exe, LICENSE, README.md $dir
+          Copy-Item soundfonts $dir -Recurse
+          Compress-Archive -Path "$dir\*" -DestinationPath "dist\NeoGuitar-${{ steps.ver.outputs.version }}-portable.zip"
+          Remove-Item $dir -Recurse
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NeoGuitar-${{ steps.ver.outputs.version }}
+          path: |
+            dist/*-setup.exe
+            dist/*-portable.zip
+
+      - name: Publicar release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            dist/*-setup.exe
+            dist/*-portable.zip

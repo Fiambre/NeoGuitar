@@ -12,6 +12,10 @@ Lector, visor y reproductor de tablaturas **Guitar Pro** escrito en Rust, con in
 - **Exportación:** MIDI y tablatura en texto.
 - Ajustes persistentes (zoom, velocidad, archivos recientes, SoundFont…).
 
+## Instalación
+
+Descarga el instalador (`NeoGuitar-x.y.z-setup.exe`) o el zip portable desde [Releases](https://github.com/Fiambre/NeoGuitar/releases). El instalador no pide permisos de administrador (se puede elegir instalar para todos los usuarios) e incluye una casilla opcional para **asociar los archivos .gp3, .gp4, .gp5, .gpx y .gp con NeoGuitar**. Más adelante también se puede hacer desde la aplicación: **Más → Asociar archivos Guitar Pro**.
+
 ## Compilar y ejecutar
 
 Requiere [Rust](https://rustup.rs) (edición 2024).
@@ -44,6 +48,15 @@ cargo test --release
 
 `samples/extra/` contiene archivos de prueba de [PyGuitarPro](https://github.com/Perlence/PyGuitarPro) y `tests/reference.rs` compara el resultado de la lectura con esa implementación de referencia (`tests/fixtures/dump_ref.py` regenera los datos).
 Las tablaturas de canciones usadas en otras pruebas no se incluyen por sus derechos de autor; esos tests se omiten si faltan.
+
+## Publicar una versión
+
+Una etiqueta `vX.Y.Z` dispara el workflow *Release* (`.github/workflows/release.yml`): ejecuta las pruebas, compila, genera el instalador con [Inno Setup](https://jrsoftware.org/isinfo.php) (`installer/neoguitar.iss`) y el zip portable, y los adjunta a un release en GitHub. El workflow *CI* compila y prueba en cada push y pull request.
+
+```
+ git tag v0.1.0
+ git push origin v0.1.0
+```
 
 ## Licencia y créditos
 
