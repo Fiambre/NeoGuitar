@@ -24,8 +24,7 @@ También puedes abrir un archivo desde la aplicación (Ctrl+O) o arrastrarlo a l
 
 ### SoundFont
 
-El audio necesita un SoundFont General MIDI. NeoGuitar busca un `.sf2` en una carpeta `soundfonts/` junto al ejecutable o al directorio de trabajo, o en la variable `NEOGUITAR_SOUNDFONT`; también puedes elegirlo desde **Más → Elegir SoundFont…**.
-Uno recomendado y de licencia permisiva es [GeneralUser GS](https://schristiancollins.com/generaluser.php).
+El repositorio incluye [GeneralUser GS](https://schristiancollins.com/generaluser.php) en `soundfonts/` (licencia en `soundfonts/LICENSE-GeneralUser-GS.txt`), así que el audio funciona al compilar. NeoGuitar busca un `.sf2` en una carpeta `soundfonts/` junto al ejecutable o al directorio de trabajo, o en la variable `NEOGUITAR_SOUNDFONT`; también puedes elegir otro desde **Más → Elegir SoundFont…**.
 
 ### Atajos
 
@@ -53,4 +52,5 @@ NeoGuitar se distribuye bajo **LGPL-2.1 o posterior** (ver `LICENSE`).
 - Los lectores de GP3–GP7 (`src/gp.rs`, `src/gpx.rs`) son una adaptación a Rust del código de [TuxGuitar](https://github.com/helge17/tuxguitar) (LGPL).
 - Fuente de notación [Bravura](https://github.com/steinbergmedia/bravura) (SIL Open Font License, ver `assets/fonts/OFL.txt`).
 - Archivos de prueba de [PyGuitarPro](https://github.com/Perlence/PyGuitarPro) (LGPL-3.0).
+- SoundFont [GeneralUser GS](https://schristiancollins.com/generaluser.php) de S. Christian Collins (licencia propia, permite su uso y redistribución en proyectos de software).
 - Síntesis con [rustysynth](https://github.com/sinshu/rustysynth), audio con [cpal](https://github.com/RustAudio/cpal).
