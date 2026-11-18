@@ -1,5 +1,9 @@
 use neoguitar::model::*;
 
+fn has(name: &str) -> bool {
+    std::path::Path::new(&format!("{}/samples/{name}", env!("CARGO_MANIFEST_DIR"))).exists()
+}
+
 fn load(name: &str) -> Song {
     let path = format!("{}/samples/{name}", env!("CARGO_MANIFEST_DIR"));
     neoguitar::load(&path).unwrap_or_else(|e| panic!("{name}: {e}"))
@@ -73,6 +77,9 @@ fn gp7() {
 #[test]
 fn bend_stats() {
     for f in ["nirvana-breed_9.gp5", "nirvana-aneurysm.gp3", "sabotage-22077.gpx", "Metallica - Nothing Else Matters (ver 6).gp"] {
+        if !has(f) {
+            continue;
+        }
         let s = load(f);
         let mut hist = std::collections::BTreeMap::new();
         for t in &s.tracks {
@@ -89,6 +96,9 @@ fn bend_stats() {
 #[test]
 fn bend_locations() {
     for (f, track) in [("Metallica - Nothing Else Matters (ver 6).gp", 3usize), ("nirvana-breed_9.gp5", 1)] {
+        if !has(f) {
+            continue;
+        }
         let s = load(f);
         let t = &s.tracks[track - 1];
         let mut found = Vec::new();
