@@ -1,6 +1,6 @@
 [package]
 name = "neoguitar"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 description = "Lector, visor y reproductor de tablaturas Guitar Pro (GP3 a GP7) con interfaz egui"
 license = "LGPL-2.1-or-later"
