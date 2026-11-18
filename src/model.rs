@@ -331,3 +331,22 @@ pub fn drum_name(midi: u8) -> Option<&'static str> {
         _ => return None,
     })
 }
+
+impl Track {
+    /// Notas `(cuerda 1-based, traste)` que suenan en el tick absoluto `tick` dentro del compás `measure`.
+    pub fn sounding_notes(&self, measure: usize, tick: u64) -> Vec<(u8, u8)> {
+        let Some(m) = self.measures.get(measure) else { return Vec::new() };
+        let mut out = Vec::new();
+        for beat in &m.beats {
+            if beat.start > tick {
+                break;
+            }
+            for v in beat.voices.iter().filter(|v| !v.empty) {
+                if tick < beat.start + v.duration.time() {
+                    out.extend(v.notes.iter().filter(|n| !n.effect.dead).map(|n| (n.string, n.fret)));
+                }
+            }
+        }
+        out
+    }
+}

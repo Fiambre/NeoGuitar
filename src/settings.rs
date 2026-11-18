@@ -13,6 +13,8 @@ pub struct Settings {
     pub follow: bool,
     /// Vista de varias pistas a la vez.
     pub multi_view: bool,
+    /// Mástil virtual bajo la partitura.
+    pub show_fretboard: bool,
     /// Velocidad de reproducción en porcentaje.
     pub speed: f32,
     pub volume: f32,
@@ -34,6 +36,7 @@ impl Default for Settings {
             show_side: true,
             follow: true,
             multi_view: false,
+            show_fretboard: false,
             speed: 100.0,
             volume: 1.0,
             metronome: false,
@@ -68,6 +71,7 @@ impl Settings {
                 "show_side" => s.show_side = parse_bool(value).unwrap_or(s.show_side),
                 "follow" => s.follow = parse_bool(value).unwrap_or(s.follow),
                 "multi_view" => s.multi_view = parse_bool(value).unwrap_or(s.multi_view),
+                "show_fretboard" => s.show_fretboard = parse_bool(value).unwrap_or(s.show_fretboard),
                 "speed" => s.speed = value.parse::<f32>().map(|v| v.clamp(30.0, 150.0)).unwrap_or(s.speed),
                 "volume" => s.volume = value.parse::<f32>().map(|v| v.clamp(0.0, 1.5)).unwrap_or(s.volume),
                 "metronome" => s.metronome = parse_bool(value).unwrap_or(s.metronome),
@@ -95,6 +99,7 @@ impl Settings {
         }
         out.push_str(&format!("zoom={:.2}\n", self.zoom));
         out.push_str(&format!("show_staff={}\nshow_side={}\nfollow={}\nmulti_view={}\n", b(self.show_staff), b(self.show_side), b(self.follow), b(self.multi_view)));
+        out.push_str(&format!("show_fretboard={}\n", b(self.show_fretboard)));
         out.push_str(&format!("speed={:.0}\nvolume={:.2}\n", self.speed, self.volume));
         out.push_str(&format!("metronome={}\ncount_in={}\n", b(self.metronome), b(self.count_in)));
         out.push_str(&format!("trainer_on={}\ntrainer_step={}\ntrainer_max={}\n", b(self.trainer_on), self.trainer_step, self.trainer_max));

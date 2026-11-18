@@ -162,6 +162,7 @@ pub enum Icon {
     Follow,
     Dots,
     Headphones,
+    Fretboard,
 }
 
 /// Botón con un icono dibujado. `style`: `Round` es el botón grande de reproducir.
@@ -322,6 +323,14 @@ pub fn draw_icon(p: &egui::Painter, icon: Icon, c: egui::Pos2, u: f32, fg: Color
             for x in [-1.3f32, 0.0, 1.3] {
                 p.circle_filled(pt(x, 0.0), 0.35 * u + 0.4, fg);
             }
+        }
+        Icon::Fretboard => {
+            p.rect_stroke(egui::Rect::from_min_max(pt(-2.0, -1.5), pt(2.0, 1.5)), radius(2), st, StrokeKind::Inside);
+            for x in [-0.7f32, 0.6] {
+                line(&[(x, -1.5), (x, 1.5)]);
+            }
+            line(&[(-2.0, 0.0), (2.0, 0.0)]);
+            p.circle_filled(pt(0.0, -0.75), 0.45 * u + 0.5, fg);
         }
         Icon::Headphones => {
             let pts: Vec<_> = (0..=12)

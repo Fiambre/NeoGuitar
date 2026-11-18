@@ -295,3 +295,29 @@ fn count_in_and_trainer() {
     println!("entrenador: velocidad final {pct}%");
     assert_eq!(pct, 90, "debe llegar al máximo y quedarse ahí");
 }
+
+#[test]
+fn export_wav_offline() {
+    use neoguitar::audio::render_wav;
+    let sf = format!("{}/soundfonts/GeneralUser-GS.sf2", env!("CARGO_MANIFEST_DIR"));
+    let Ok(mut file) = std::fs::File::open(&sf) else {
+        eprintln!("sin SoundFont, se omite");
+        return;
+    };
+    let font = Arc::new(SoundFont::new(&mut file).unwrap());
+    let song = load("extra/Demo v5.gp5");
+    let tl = Arc::new(Timeline::build(&song));
+    let out = format!("{}/target/export-test.wav", env!("CARGO_MANIFEST_DIR"));
+    render_wav(font, tl.clone(), u64::MAX, &[100; 64], false, 1.0, std::path::Path::new(&out)).unwrap();
+    let bytes = std::fs::read(&out).unwrap();
+    assert_eq!(&bytes[0..4], b"RIFF");
+    assert_eq!(&bytes[8..12], b"WAVE");
+    let data_len = u32::from_le_bytes(bytes[40..44].try_into().unwrap()) as usize;
+    assert_eq!(bytes.len(), 44 + data_len);
+    let secs = data_len as f64 / (44100.0 * 4.0);
+    println!("WAV: {secs:.1} s (la canción dura {:.1} s)", tl.total);
+    assert!(secs > tl.total && secs < tl.total + 3.0, "duración inesperada: {secs}");
+    let peak = bytes[44..].chunks_exact(2).map(|b| i16::from_le_bytes([b[0], b[1]]).unsigned_abs()).max().unwrap();
+    assert!(peak > 1000, "el WAV quedó en silencio");
+    assert!(peak <= 32767);
+}

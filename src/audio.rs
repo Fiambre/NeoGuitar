@@ -24,6 +24,8 @@ pub struct Player {
     tx: Sender<Cmd>,
     loader: Option<Receiver<Result<Arc<SoundFont>, String>>>,
     stream: Option<cpal::Stream>,
+    /// SoundFont ya cargado (para exportar audio sin pasar por el dispositivo).
+    font: Option<Arc<SoundFont>>,
     pub speed: f32,
     pub volume: f32,
     /// Compases (desde, hasta) del bucle, base 0, ambos inclusive.
@@ -43,6 +45,7 @@ impl Player {
             tx,
             loader: None,
             stream: None,
+            font: None,
             speed: 1.0,
             volume: 1.0,
             loop_measures: None,
@@ -56,6 +59,7 @@ impl Player {
 
     pub fn load_soundfont(&mut self, path: &Path) {
         self.stream = None; // detiene el motor anterior
+        self.font = None;
         self.shared.playing.store(false, Ordering::Relaxed);
         self.status = Status::Loading(path.to_path_buf());
         let (tx, rx) = channel();
@@ -83,6 +87,7 @@ impl Player {
     }
 
     fn start_stream(&mut self, font: Arc<SoundFont>) -> Result<(), String> {
+        self.font = Some(font.clone());
         let host = cpal::default_host();
         let device = host.default_output_device().ok_or("no hay dispositivo de audio de salida")?;
         let config = device.default_output_config().map_err(|e| format!("configuración de audio: {e}"))?;
@@ -238,6 +243,25 @@ impl Player {
         std::fs::write(path, bytes).map_err(|e| format!("{}: {e}", path.display()))
     }
 
+    /// Renderiza la canción completa a un WAV (16 bits, estéreo, 44,1 kHz) en un hilo aparte.
+    /// Respeta las pistas activas, sus ganancias, el metrónomo y el volumen actuales; siempre a velocidad 100 %.
+    pub fn export_wav(&self, path: &Path) -> Result<Receiver<Result<(), String>>, String> {
+        let font = self.font.clone().ok_or("el SoundFont todavía no está cargado")?;
+        let timeline = self.timeline.clone();
+        if timeline.total <= 0.0 {
+            return Err("la canción no tiene contenido para exportar".into());
+        }
+        let mask = self.shared.mask.load(Ordering::Relaxed);
+        let gains: Vec<u8> = self.shared.gains.iter().map(|g| g.load(Ordering::Relaxed)).collect();
+        let (metronome, volume) = (self.metronome(), self.volume);
+        let path = path.to_path_buf();
+        let (tx, rx) = channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(render_wav(font, timeline, mask, &gains, metronome, volume, &path));
+        });
+        Ok(rx)
+    }
+
     pub fn is_playing(&self) -> bool {
         self.shared.playing.load(Ordering::Relaxed)
     }
@@ -317,4 +341,58 @@ pub fn find_soundfont() -> Option<PathBuf> {
         }
     }
     None
+}
+
+/// Render fuera de línea de toda la canción a un archivo WAV.
+pub fn render_wav(font: Arc<SoundFont>, timeline: Arc<Timeline>, mask: u64, gains: &[u8], metronome: bool, volume: f32, path: &Path) -> Result<(), String> {
+    const SAMPLE_RATE: u32 = 44100;
+    const CHUNK: usize = 512;
+    let shared = Arc::new(Shared::default());
+    shared.mask.store(mask, Ordering::Relaxed);
+    shared.metronome.store(metronome, Ordering::Relaxed);
+    for (g, v) in shared.gains.iter().zip(gains) {
+        g.store(*v, Ordering::Relaxed);
+    }
+    let total = timeline.total;
+    let (tx, rx) = channel();
+    let mut engine = Engine::new(font, SAMPLE_RATE, shared.clone(), rx)?;
+    let _ = tx.send(Cmd::SetTimeline(timeline));
+    let _ = tx.send(Cmd::SetVolume(volume));
+    let _ = tx.send(Cmd::Play);
+
+    let max_frames = ((total + 10.0) * SAMPLE_RATE as f64) as usize;
+    let mut pcm: Vec<f32> = Vec::with_capacity(((total + 2.0) * SAMPLE_RATE as f64) as usize * 2);
+    let (mut l, mut r) = (vec![0f32; CHUNK], vec![0f32; CHUNK]);
+    let mut peak = 0f32;
+    while pcm.len() / 2 < max_frames {
+        engine.render(&mut l, &mut r);
+        for i in 0..CHUNK {
+            peak = peak.max(l[i].abs()).max(r[i].abs());
+            pcm.push(l[i]);
+            pcm.push(r[i]);
+        }
+        if !shared.playing.load(Ordering::Relaxed) {
+            break;
+        }
+    }
+    // Si se pasa de 0 dBFS, se baja el nivel en vez de recortar.
+    let scale = if peak > 0.99 { 0.99 / peak } else { 1.0 };
+    let data_len = (pcm.len() * 2) as u32;
+    let mut wav = Vec::with_capacity(44 + data_len as usize);
+    wav.extend_from_slice(b"RIFF");
+    wav.extend_from_slice(&(36 + data_len).to_le_bytes());
+    wav.extend_from_slice(b"WAVEfmt ");
+    wav.extend_from_slice(&16u32.to_le_bytes());
+    wav.extend_from_slice(&1u16.to_le_bytes()); // PCM
+    wav.extend_from_slice(&2u16.to_le_bytes()); // canales
+    wav.extend_from_slice(&SAMPLE_RATE.to_le_bytes());
+    wav.extend_from_slice(&(SAMPLE_RATE * 4).to_le_bytes());
+    wav.extend_from_slice(&4u16.to_le_bytes());
+    wav.extend_from_slice(&16u16.to_le_bytes());
+    wav.extend_from_slice(b"data");
+    wav.extend_from_slice(&data_len.to_le_bytes());
+    for v in &pcm {
+        wav.extend_from_slice(&(((v * scale).clamp(-1.0, 1.0) * 32767.0).round() as i16).to_le_bytes());
+    }
+    std::fs::write(path, wav).map_err(|e| format!("{}: {e}", path.display()))
 }

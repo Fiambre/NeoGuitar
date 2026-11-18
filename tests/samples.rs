@@ -231,3 +231,28 @@ fn settings_roundtrip() {
     assert_eq!(bad.trainer_step, 1);
     assert!(bad.recent.is_empty());
 }
+
+#[test]
+fn sounding_notes_at_beat() {
+    let s = load("extra/Demo v5.gp5");
+    let mut checked = 0;
+    for t in s.tracks.iter().filter(|t| !t.is_percussion) {
+        for (mi, m) in t.measures.iter().enumerate() {
+            for b in &m.beats {
+                for v in b.voices.iter().filter(|v| !v.empty && !v.notes.is_empty()) {
+                    let now = t.sounding_notes(mi, b.start);
+                    for n in v.notes.iter().filter(|n| !n.effect.dead) {
+                        assert!(now.contains(&(n.string, n.fret)), "falta la nota {:?} en el compás {}", (n.string, n.fret), mi + 1);
+                        checked += 1;
+                    }
+                    // Pasada la duración del pulso, la nota ya no suena (salvo que otro pulso la sostenga).
+                    let after = t.sounding_notes(mi, b.start + v.duration.time() + 1);
+                    assert!(after.len() <= now.len() + 12);
+                }
+            }
+        }
+    }
+    assert!(checked > 50, "se revisaron pocas notas: {checked}");
+    // Fuera de rango no hay nada.
+    assert!(s.tracks[0].sounding_notes(10_000, 0).is_empty());
+}

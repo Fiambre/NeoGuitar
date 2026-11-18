@@ -20,6 +20,8 @@ pub struct App {
     show_staff: bool,
     /// Mostrar varias pistas a la vez (las marcadas en `visible`).
     multi: bool,
+    /// Mástil virtual bajo la partitura.
+    show_fretboard: bool,
     visible: Vec<bool>,
     last_followed: Option<usize>,
     /// Si está definido (NEOGUITAR_SCREENSHOT), guarda un PNG del frame y cierra.
@@ -37,6 +39,11 @@ pub struct App {
     /// Resultado de la última asociación de archivos (solo Windows).
     #[allow(dead_code)]
     assoc_msg: Option<String>,
+    /// Exportación de audio en curso (hilo aparte) y aviso para mostrar en la barra inferior.
+    export_job: Option<std::sync::mpsc::Receiver<Result<(), String>>>,
+    notice: Option<String>,
+    /// Compás (base 1) al que desplazar la vista en el próximo frame.
+    jump_to: Option<usize>,
 }
 
 struct ScreenshotJob {
@@ -60,6 +67,7 @@ impl App {
             player: Player::new(settings.soundfont.clone()),
             follow: settings.follow,
             multi: settings.multi_view,
+            show_fretboard: settings.show_fretboard,
             visible: Vec::new(),
             show_staff: std::env::var("NEOGUITAR_STAFF").map(|v| v != "0").unwrap_or(settings.show_staff),
             last_followed: None,
@@ -72,6 +80,9 @@ impl App {
             persist,
             title: String::new(),
             assoc_msg: None,
+            export_job: None,
+            notice: None,
+            jump_to: None,
         };
         // Se restauran los ajustes del reproductor.
         app.player.set_speed(app.settings.speed / 100.0);
@@ -87,6 +98,9 @@ impl App {
         }
         if let Some(z) = std::env::var("NEOGUITAR_ZOOM").ok().and_then(|v| v.parse::<f32>().ok()) {
             app.zoom = z.clamp(0.6, 2.0);
+        }
+        if std::env::var_os("NEOGUITAR_FRETBOARD").is_some() {
+            app.show_fretboard = true;
         }
         if std::env::var_os("NEOGUITAR_MULTI").is_some() {
             app.multi = true;
@@ -148,6 +162,7 @@ impl App {
         s.show_side = self.show_side;
         s.follow = self.follow;
         s.multi_view = self.multi;
+        s.show_fretboard = self.show_fretboard;
         let (trainer_on, step, max) = self.player.trainer();
         s.trainer_on = trainer_on;
         s.trainer_step = step;
@@ -204,6 +219,19 @@ impl App {
         let target = rfd::FileDialog::new().add_filter("MIDI", &["mid"]).set_file_name(name).save_file();
         if let Some(p) = target {
             self.error = self.player.export_midi(&p).err().map(|e| format!("No se pudo exportar: {e}"));
+        }
+    }
+
+    fn export_wav(&mut self) {
+        let stem = self.path.as_ref().and_then(|p| p.file_stem()).map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "cancion".into());
+        let Some(p) = rfd::FileDialog::new().add_filter("Audio WAV", &["wav"]).set_file_name(format!("{stem}.wav")).save_file() else { return };
+        match self.player.export_wav(&p) {
+            Ok(rx) => {
+                self.export_job = Some(rx);
+                self.error = None;
+                self.notice = Some("Exportando audio…".into());
+            }
+            Err(e) => self.error = Some(format!("No se pudo exportar: {e}")),
         }
     }
 
@@ -272,6 +300,11 @@ impl App {
                         self.export_midi();
                         ui.close();
                     }
+                    let wav = ui.add_enabled(self.player.ready() && self.export_job.is_none(), egui::Button::new("Exportar audio (WAV)…"));
+                    if wav.on_hover_text("Pistas activas, a velocidad normal").on_disabled_hover_text("Necesita un SoundFont cargado").clicked() {
+                        self.export_wav();
+                        ui.close();
+                    }
                     if ui.button("Exportar tablatura (txt)…").on_hover_text("Pista actual").clicked() {
                         self.export_ascii();
                         ui.close();
@@ -313,6 +346,7 @@ impl App {
                 ui.add_space(6.0);
                 theme::chip(ui, Icon::Sidebar, self.show_side, "Panel").clicked().then(|| self.show_side = !self.show_side);
                 theme::chip(ui, Icon::Layers, self.multi, "Multipista").on_hover_text("Ver varias pistas a la vez (elegí cuáles con el ojo del panel)").clicked().then(|| self.multi = !self.multi);
+                theme::chip(ui, Icon::Fretboard, self.show_fretboard, "Mástil").on_hover_text("Mostrar en el mástil las notas que suenan").clicked().then(|| self.show_fretboard = !self.show_fretboard);
                 theme::chip(ui, Icon::Staff, self.show_staff, "Pentagrama").clicked().then(|| self.show_staff = !self.show_staff);
             });
         });
@@ -422,6 +456,9 @@ impl App {
                 }
                 Status::Ready(_) => {}
             }
+            if let Some(n) = &self.notice {
+                ui.colored_label(theme::ACCENT, n);
+            }
         });
     }
 }
@@ -435,6 +472,25 @@ impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.player.poll();
+        if let Some(rx) = &self.export_job {
+            match rx.try_recv() {
+                Ok(result) => {
+                    self.export_job = None;
+                    match result {
+                        Ok(()) => self.notice = Some("Audio exportado".into()),
+                        Err(e) => {
+                            self.notice = None;
+                            self.error = Some(format!("No se pudo exportar: {e}"));
+                        }
+                    }
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => ctx.request_repaint_after(Duration::from_millis(200)),
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.export_job = None;
+                    self.notice = None;
+                }
+            }
+        }
         self.player.sync_speed();
         self.persist_settings();
         if matches!(self.player.status, Status::Loading(_)) {
@@ -498,11 +554,24 @@ impl eframe::App for App {
                 self.transport(ui);
             });
         }
+        if self.show_fretboard {
+            if let Some(track) = self.song.as_ref().and_then(|s| s.tracks.get(self.track)) {
+                let pos = self.player.position();
+                let active = if self.player.is_playing() || pos > 0.0 {
+                    self.player.timeline.position(pos).map(|(m, tick)| track.sounding_notes(m, tick)).unwrap_or_default()
+                } else {
+                    Vec::new()
+                };
+                egui::Panel::bottom("fretboard").frame(theme::panel_frame(egui::Margin::symmetric(14, 8))).show_separator_line(true).show(ui, |ui| {
+                    crate::fretboard::show(ui, track, &active);
+                });
+            }
+        }
         if let Some(song) = &self.song {
             if self.show_side {
                 egui::Panel::left("info").default_size(300.0).size_range(240.0..=460.0).frame(theme::panel_frame(egui::Margin::same(12))).show(ui, |ui| {
                     egui::ScrollArea::vertical().show(ui, |ui| {
-                        side_info(ui, song, self.path.as_deref(), &mut self.track, &self.player, &mut self.visible, self.multi)
+                        side_info(ui, song, self.path.as_deref(), &mut self.track, &self.player, &mut self.visible, self.multi, &mut self.jump_to)
                     });
                 });
             }
@@ -515,7 +584,7 @@ impl eframe::App for App {
         } else {
             None
         };
-        let mut scroll_to = self.focus_measure;
+        let mut scroll_to = self.jump_to.take().or(self.focus_measure);
         if self.follow && self.player.is_playing() {
             if let Some((m, _)) = playhead {
                 if self.last_followed != Some(m) {
@@ -605,7 +674,7 @@ fn track_label(t: &neoguitar::model::Track) -> String {
     format!("{}. {}", t.number, name)
 }
 
-fn side_info(ui: &mut egui::Ui, song: &Song, path: Option<&Path>, selected: &mut usize, player: &Player, visible: &mut [bool], multi: bool) {
+fn side_info(ui: &mut egui::Ui, song: &Song, path: Option<&Path>, selected: &mut usize, player: &Player, visible: &mut [bool], multi: bool, jump: &mut Option<usize>) {
     theme::card().show(ui, |ui| {
         ui.set_width(ui.available_width());
         if let Some(p) = path.and_then(|p| p.file_name()) {
@@ -711,7 +780,34 @@ fn side_info(ui: &mut egui::Ui, song: &Song, path: Option<&Path>, selected: &mut
             });
         });
     }
+    sections_panel(ui, song, player, jump);
     chords_panel(ui, song);
+}
+
+/// Secciones de la canción (marcadores de compás): un clic lleva la vista y la reproducción a ese compás.
+fn sections_panel(ui: &mut egui::Ui, song: &Song, player: &Player, jump: &mut Option<usize>) {
+    let sections: Vec<(usize, &str)> = song
+        .headers
+        .iter()
+        .enumerate()
+        .filter_map(|(i, h)| h.marker.as_deref().map(str::trim).filter(|m| !m.is_empty()).map(|m| (i, m)))
+        .collect();
+    if sections.is_empty() {
+        return;
+    }
+    theme::section(ui, &format!("Secciones ({})", sections.len()));
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
+        for (i, name) in sections {
+            let label = format!("{name} · {}", i + 1);
+            if theme::icon_label(ui, None, &label, false, true, false).on_hover_text(format!("Ir al compás {}", i + 1)).clicked() {
+                if let Some(t) = player.timeline.time_of_measure(i) {
+                    player.seek(t);
+                }
+                *jump = Some(i + 1);
+            }
+        }
+    });
 }
 
 fn save_png(path: &Path, img: &egui::ColorImage) -> Result<(), String> {
