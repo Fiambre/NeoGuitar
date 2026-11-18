@@ -13,6 +13,9 @@ fn matches_pyguitarpro() {
         let mut it = line.split('|');
         let (file, track, counts) = (it.next().unwrap(), it.next().unwrap().parse::<usize>().unwrap(), it.next().unwrap());
         let expected: Vec<usize> = counts.split(',').filter(|s| !s.is_empty()).map(|s| s.parse().unwrap()).collect();
+        if !Path::new(&format!("{root}/{file}")).exists() {
+            continue; // muestra no incluida en el repositorio (derechos de autor)
+        }
         if cache.as_ref().map(|c| c.0 != file).unwrap_or(true) {
             match neoguitar::load(Path::new(&format!("{root}/{file}"))) {
                 Ok(s) => cache = Some((file.to_string(), s)),
