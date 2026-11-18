@@ -33,7 +33,7 @@ fn egui_viewport() -> eframe::egui::ViewportBuilder {
 fn window_icon() -> eframe::egui::IconData {
     let bytes = include_bytes!("../assets/icon/icon-256.png");
     let mut reader = png::Decoder::new(std::io::Cursor::new(&bytes[..])).read_info().expect("icono PNG");
-    let mut buf = vec![0; reader.output_buffer_size().expect("tamaño del icono")];
+    let mut buf = vec![0; reader.output_buffer_size().expect("icon size")];
     let info = reader.next_frame(&mut buf).expect("icono PNG");
     buf.truncate(info.buffer_size());
     eframe::egui::IconData { rgba: buf, width: info.width, height: info.height }

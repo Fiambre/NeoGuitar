@@ -24,19 +24,19 @@ pub fn parse_gpx6(data: &[u8]) -> Res<Song> {
         .iter()
         .find(|(name, _)| name == "score.gpif")
         .map(|(_, bytes)| bytes)
-        .ok_or_else(|| GpError::Invalid("no se encontró score.gpif dentro del .gpx".into()))?;
+        .ok_or_else(|| GpError::Invalid("score.gpif not found inside the .gpx".into()))?;
     parse_gpif(&String::from_utf8_lossy(score), "Guitar Pro 6")
 }
 
 pub fn parse_gp7(data: &[u8]) -> Res<Song> {
-    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(data)).map_err(|e| GpError::Invalid(format!("ZIP inválido: {e}")))?;
+    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(data)).map_err(|e| GpError::Invalid(format!("invalid ZIP: {e}")))?;
     let mut xml = String::new();
     {
         let mut entry = zip
             .by_name("Content/score.gpif")
-            .map_err(|_| GpError::Invalid("no se encontró Content/score.gpif dentro del .gp".into()))?;
+            .map_err(|_| GpError::Invalid("Content/score.gpif not found inside the .gp".into()))?;
         let mut bytes = Vec::new();
-        entry.read_to_end(&mut bytes).map_err(|e| GpError::Invalid(format!("no se pudo descomprimir score.gpif: {e}")))?;
+        entry.read_to_end(&mut bytes).map_err(|e| GpError::Invalid(format!("could not decompress score.gpif: {e}")))?;
         xml.push_str(&String::from_utf8_lossy(&bytes));
     }
     let mut version = String::new();
@@ -90,7 +90,7 @@ fn bcfz_decompress(src: &[u8]) -> Res<Vec<u8>> {
     }
     let expected = u32::from_le_bytes([src[0], src[1], src[2], src[3]]) as usize;
     if expected > MAX_BCFS {
-        return invalid(format!("tamaño descomprimido excesivo ({expected})"));
+        return invalid(format!("decompressed size too large ({expected})"));
     }
     let mut bits = Bits { data: &src[4..], pos: 0 };
     let mut out: Vec<u8> = Vec::with_capacity(expected);
@@ -101,7 +101,7 @@ fn bcfz_decompress(src: &[u8]) -> Res<Vec<u8>> {
             let (Some(offs), Some(size)) = (bits.read_reversed(width), bits.read_reversed(width)) else { break };
             let (offs, size) = (offs as usize, size as usize);
             let Some(pos) = out.len().checked_sub(offs) else {
-                return invalid("referencia inválida en BCFZ");
+                return invalid("invalid reference in BCFZ");
             };
             for i in 0..size.min(offs) {
                 out.push(out[pos + i]);
@@ -133,10 +133,10 @@ fn bcfs_files(data: &[u8]) -> Res<Vec<(String, Vec<u8>)>> {
             &decompressed
         }
         Some(h) if h == BCFS => data,
-        _ => return invalid("no es un archivo GPX"),
+        _ => return invalid("not a GPX file"),
     };
     if bcfs.get(..4) != Some(BCFS) {
-        return invalid("el contenido descomprimido no es BCFS");
+        return invalid("the decompressed content is not BCFS");
     }
     // TuxGuitar indexa los sectores sin contar la cabecera de 4 bytes.
     let files = read_sectors(&bcfs[4..]);
@@ -145,7 +145,7 @@ fn bcfs_files(data: &[u8]) -> Res<Vec<(String, Vec<u8>)>> {
     }
     let files = read_sectors(bcfs);
     if files.is_empty() {
-        return invalid("el GPX no contiene archivos");
+        return invalid("the GPX contains no files");
     }
     Ok(files)
 }
@@ -386,7 +386,7 @@ struct GTrack {
 // ============================================================= lectura
 
 fn parse_gpif(xml: &str, format: &str) -> Res<Song> {
-    let doc = Document::parse(xml).map_err(|e| GpError::Invalid(format!("XML inválido: {e}")))?;
+    let doc = Document::parse(xml).map_err(|e| GpError::Invalid(format!("invalid XML: {e}")))?;
     let root = doc.root_element();
 
     let mut song = Song { format: format.to_string(), ..Default::default() };
@@ -425,7 +425,7 @@ fn parse_gpif(xml: &str, format: &str) -> Res<Song> {
     read_rhythms(root, &mut ctx);
 
     if master_bars.is_empty() {
-        return invalid("el archivo no tiene compases");
+        return invalid("the file has no measures");
     }
 
     // Pistas del modelo.

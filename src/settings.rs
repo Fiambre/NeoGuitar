@@ -93,7 +93,7 @@ impl Settings {
 
     pub fn serialize(&self) -> String {
         let b = |v: bool| if v { "1" } else { "0" };
-        let mut out = String::from("# Ajustes de NeoGuitar\n");
+        let mut out = String::from("# NeoGuitar settings\n");
         if let Some(p) = &self.soundfont {
             out.push_str(&format!("soundfont={}\n", p.display()));
         }

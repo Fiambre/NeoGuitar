@@ -135,7 +135,7 @@ impl App {
                 self.last_followed = None;
             }
             Err(e) => {
-                self.error = Some(format!("No se pudo abrir {}: {e}", path.display()));
+                self.error = Some(format!("Could not open {}: {e}", path.display()));
             }
         }
     }
@@ -153,7 +153,7 @@ impl App {
             let close_ctx = ctx.clone();
             ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::ScreenshotCallback::new(move |img| {
                 if let Err(e) = save_png(&path, &img) {
-                    eprintln!("no se pudo guardar la captura: {e}");
+                    eprintln!("could not save the screenshot: {e}");
                 }
                 close_ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             })));
@@ -201,7 +201,7 @@ impl App {
     fn pick_file(&mut self) {
         let picked = rfd::FileDialog::new()
             .add_filter("Guitar Pro", &["gp3", "gp4", "gp5", "gpx", "gp", "gtp"])
-            .add_filter("Todos los archivos", &["*"])
+            .add_filter("All files", &["*"])
             .pick_file();
         if let Some(p) = picked {
             self.open(&p);
@@ -221,23 +221,23 @@ impl App {
             .as_ref()
             .and_then(|p| p.file_stem())
             .map(|s| format!("{}.mid", s.to_string_lossy()))
-            .unwrap_or_else(|| "cancion.mid".to_string());
+            .unwrap_or_else(|| "song.mid".to_string());
         let target = rfd::FileDialog::new().add_filter("MIDI", &["mid"]).set_file_name(name).save_file();
         if let Some(p) = target {
-            self.error = self.player.export_midi(&p).err().map(|e| format!("No se pudo exportar: {e}"));
+            self.error = self.player.export_midi(&p).err().map(|e| format!("Export failed: {e}"));
         }
     }
 
     fn export_wav(&mut self) {
-        let stem = self.path.as_ref().and_then(|p| p.file_stem()).map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "cancion".into());
+        let stem = self.path.as_ref().and_then(|p| p.file_stem()).map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "song".into());
         let Some(p) = rfd::FileDialog::new().add_filter("Audio WAV", &["wav"]).set_file_name(format!("{stem}.wav")).save_file() else { return };
         match self.player.export_wav(&p) {
             Ok(rx) => {
                 self.export_job = Some(rx);
                 self.error = None;
-                self.notice = Some("Exportando audio…".into());
+                self.notice = Some("Exporting audio…".into());
             }
-            Err(e) => self.error = Some(format!("No se pudo exportar: {e}")),
+            Err(e) => self.error = Some(format!("Export failed: {e}")),
         }
     }
 
@@ -247,8 +247,8 @@ impl App {
         let text = neoguitar::ascii::ascii_tab(song, track, 100);
         let stem = self.path.as_ref().and_then(|p| p.file_stem()).map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "tab".into());
         let name = format!("{stem} - {}.txt", track.name.trim().replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "_"));
-        if let Some(p) = rfd::FileDialog::new().add_filter("Texto", &["txt"]).set_file_name(name).save_file() {
-            self.error = std::fs::write(&p, text).err().map(|e| format!("No se pudo exportar: {e}"));
+        if let Some(p) = rfd::FileDialog::new().add_filter("Text", &["txt"]).set_file_name(name).save_file() {
+            self.error = std::fs::write(&p, text).err().map(|e| format!("Export failed: {e}"));
         }
     }
 
@@ -268,15 +268,15 @@ impl App {
     fn top_bar(&mut self, ui: &mut egui::Ui) {
         let labels: Vec<String> = self.song.as_ref().map(|s| s.tracks.iter().map(track_label).collect()).unwrap_or_default();
         ui.horizontal(|ui| {
-            if theme::primary_button(ui, "Abrir").on_hover_text("Ctrl+O").clicked() {
+            if theme::primary_button(ui, "Open").on_hover_text("Ctrl+O").clicked() {
                 self.pick_file();
             }
             let mut reopen: Option<PathBuf> = None;
-            let recent_btn = theme::icon_label(ui, Some(Icon::Clock), "Recientes", false, true, false);
+            let recent_btn = theme::icon_label(ui, Some(Icon::Clock), "Recent", false, true, false);
             egui::Popup::menu(&recent_btn).show(|ui| {
                 ui.set_min_width(220.0);
                 if self.settings.recent.is_empty() {
-                    ui.weak("(sin archivos recientes)");
+                    ui.weak("(no recent files)");
                 }
                 for p in &self.settings.recent {
                     let label = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| p.display().to_string());
@@ -300,33 +300,33 @@ impl App {
                 }
             });
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                let more_btn = theme::icon_label(ui, Some(Icon::Dots), "Más", false, true, false);
+                let more_btn = theme::icon_label(ui, Some(Icon::Dots), "More", false, true, false);
                 egui::Popup::menu(&more_btn).show(|ui| {
-                    if ui.button("Exportar MIDI…").on_hover_text("Pistas activas").clicked() {
+                    if ui.button("Export MIDI…").on_hover_text("Active tracks").clicked() {
                         self.export_midi();
                         ui.close();
                     }
-                    let wav = ui.add_enabled(self.player.ready() && self.export_job.is_none(), egui::Button::new("Exportar audio (WAV)…"));
-                    if wav.on_hover_text("Pistas activas, a velocidad normal").on_disabled_hover_text("Necesita un SoundFont cargado").clicked() {
+                    let wav = ui.add_enabled(self.player.ready() && self.export_job.is_none(), egui::Button::new("Export audio (WAV)…"));
+                    if wav.on_hover_text("Active tracks, at normal speed").on_disabled_hover_text("Needs a loaded SoundFont").clicked() {
                         self.export_wav();
                         ui.close();
                     }
-                    if ui.button("Exportar tablatura (txt)…").on_hover_text("Pista actual").clicked() {
+                    if ui.button("Export tab as text (txt)…").on_hover_text("Current track").clicked() {
                         self.export_ascii();
                         ui.close();
                     }
                     ui.separator();
-                    if ui.button("Elegir SoundFont…").clicked() {
+                    if ui.button("Choose SoundFont…").clicked() {
                         self.pick_soundfont();
                         ui.close();
                     }
                     #[cfg(windows)]
                     {
-                        let tip = "Abrir los archivos .gp3, .gp4, .gp5, .gpx y .gp con NeoGuitar al hacer doble clic";
-                        if ui.button("Asociar archivos Guitar Pro").on_hover_text(tip).clicked() {
+                        let tip = "Open .gp3, .gp4, .gp5, .gpx and .gp files with NeoGuitar when double-clicked";
+                        if ui.button("Associate Guitar Pro files").on_hover_text(tip).clicked() {
                             self.assoc_msg = Some(match crate::assoc::associate() {
-                                Ok(()) => "Archivos asociados. Si Windows sigue abriendo otro programa, elígelo en «Abrir con».".to_string(),
-                                Err(e) => format!("No se pudo asociar: {e}"),
+                                Ok(()) => "Files associated. If Windows still opens another program, choose NeoGuitar under “Open with”.".to_string(),
+                                Err(e) => format!("Could not associate: {e}"),
                             });
                         }
                         if let Some(m) = &self.assoc_msg {
@@ -334,26 +334,26 @@ impl App {
                         }
                     }
                     match &self.player.status {
-                        Status::NoSoundFont => ui.colored_label(theme::DANGER, "Sin SoundFont (elegí un .sf2)"),
-                        Status::Loading(_) => ui.weak("Cargando SoundFont…"),
+                        Status::NoSoundFont => ui.colored_label(theme::DANGER, "No SoundFont (choose a .sf2)"),
+                        Status::Loading(_) => ui.weak("Loading SoundFont…"),
                         Status::Ready(p) => ui.weak(p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()),
                         Status::Error(e) => ui.colored_label(theme::DANGER, e),
                     };
                 });
                 ui.add_space(6.0);
-                if theme::icon_button(ui, Icon::Plus, 28.0, IconStyle::Flat, true).on_hover_text("Acercar").clicked() {
+                if theme::icon_button(ui, Icon::Plus, 28.0, IconStyle::Flat, true).on_hover_text("Zoom in").clicked() {
                     self.zoom = (self.zoom + 0.1).min(2.0);
                 }
                 ui.spacing_mut().slider_width = 90.0;
                 ui.add(egui::Slider::new(&mut self.zoom, 0.6..=2.0).show_value(false));
-                if theme::icon_button(ui, Icon::Minus, 28.0, IconStyle::Flat, true).on_hover_text("Alejar").clicked() {
+                if theme::icon_button(ui, Icon::Minus, 28.0, IconStyle::Flat, true).on_hover_text("Zoom out").clicked() {
                     self.zoom = (self.zoom - 0.1).max(0.6);
                 }
                 ui.add_space(6.0);
                 theme::chip(ui, Icon::Sidebar, self.show_side, "Panel").clicked().then(|| self.show_side = !self.show_side);
-                theme::chip(ui, Icon::Layers, self.multi, "Multipista").on_hover_text("Ver varias pistas a la vez (elegí cuáles con el ojo del panel)").clicked().then(|| self.multi = !self.multi);
-                theme::chip(ui, Icon::Fretboard, self.show_fretboard, "Mástil").on_hover_text("Mostrar en el mástil las notas que suenan").clicked().then(|| self.show_fretboard = !self.show_fretboard);
-                theme::chip(ui, Icon::Staff, self.show_staff, "Pentagrama").clicked().then(|| self.show_staff = !self.show_staff);
+                theme::chip(ui, Icon::Layers, self.multi, "Multi-track").on_hover_text("Show several tracks at once (pick which with the eye icon in the panel)").clicked().then(|| self.multi = !self.multi);
+                theme::chip(ui, Icon::Fretboard, self.show_fretboard, "Fretboard").on_hover_text("Show the sounding notes on the fretboard").clicked().then(|| self.show_fretboard = !self.show_fretboard);
+                theme::chip(ui, Icon::Staff, self.show_staff, "Staff").clicked().then(|| self.show_staff = !self.show_staff);
             });
         });
         if let Some(err) = &self.error {
@@ -390,18 +390,18 @@ impl App {
 
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing.x = 8.0;
-            if theme::icon_button(ui, Icon::Stop, 32.0, IconStyle::Flat, can_play).on_hover_text("Detener (Inicio)").clicked() {
+            if theme::icon_button(ui, Icon::Stop, 32.0, IconStyle::Flat, can_play).on_hover_text("Stop (Home)").clicked() {
                 self.player.stop();
                 self.last_followed = None;
             }
             let icon = if playing { Icon::Pause } else { Icon::Play };
-            if theme::icon_button(ui, icon, 42.0, IconStyle::Round, can_play).on_hover_text("Reproducir / pausar (Espacio)").clicked() {
+            if theme::icon_button(ui, icon, 42.0, IconStyle::Round, can_play).on_hover_text("Play / pause (Space)").clicked() {
                 self.toggle_play();
             }
             ui.add_space(8.0);
 
             let mut speed = self.player.speed * 100.0;
-            ui.label(RichText::new("Velocidad").color(theme::MUTED));
+            ui.label(RichText::new("Speed").color(theme::MUTED));
             ui.spacing_mut().slider_width = 100.0;
             if ui.add(egui::Slider::new(&mut speed, 30.0..=150.0).suffix("%").integer()).changed() {
                 self.player.set_speed(speed / 100.0);
@@ -409,7 +409,7 @@ impl App {
             ui.add_space(4.0);
             let mut volume = self.player.volume;
             let muted = volume <= 0.001;
-            if theme::icon_button(ui, if muted { Icon::SpeakerOff } else { Icon::Speaker }, 30.0, IconStyle::Flat, true).on_hover_text("Volumen").clicked() {
+            if theme::icon_button(ui, if muted { Icon::SpeakerOff } else { Icon::Speaker }, 30.0, IconStyle::Flat, true).on_hover_text("Volume").clicked() {
                 self.player.set_volume(if muted { 1.0 } else { 0.0 });
             }
             ui.spacing_mut().slider_width = 80.0;
@@ -419,34 +419,40 @@ impl App {
             ui.add_space(8.0);
 
             let metronome = self.player.metronome();
-            if theme::chip(ui, Icon::Metronome, metronome, "Metrónomo").on_hover_text("M").clicked() {
+            if theme::chip(ui, Icon::Metronome, metronome, "Metronome").on_hover_text("M").clicked() {
                 self.player.set_metronome(!metronome);
             }
             let has_loop = self.player.loop_measures.is_some();
             let looping = self.player.loop_enabled();
             let loop_label = match self.player.loop_measures {
-                Some((a, b)) => format!("Bucle {}–{}", a + 1, b + 1),
-                None => "Bucle".to_string(),
+                Some((a, b)) => format!("Loop {}–{}", a + 1, b + 1),
+                None => "Loop".to_string(),
             };
-            let hint = "Clic derecho sobre un compás para definir el bucle";
+            let hint = "Right-click a measure to set the loop";
             if theme::chip_enabled(ui, Icon::Loop, looping, &loop_label, has_loop).on_hover_text(hint).clicked() {
                 self.player.set_loop_enabled(!looping);
             }
-            if theme::chip(ui, Icon::Timer, self.count_in, "Cuenta").on_hover_text("Un compás de clics antes de empezar").clicked() {
+            if theme::chip(ui, Icon::Timer, self.count_in, "Count-in").on_hover_text("One measure of clicks before starting").clicked() {
                 self.count_in = !self.count_in;
             }
             let tone_label = match self.player.transpose {
-                0 => "Tono".to_string(),
-                n => format!("Tono {n:+}"),
+                0 => "Transpose".to_string(),
+                n => format!("Transpose {n:+}"),
             };
             let tone_btn = theme::icon_label(ui, Some(Icon::Transpose), &tone_label, self.player.transpose != 0, true, false);
             egui::Popup::menu(&tone_btn).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
                 ui.set_min_width(260.0);
-                ui.label("Transponer el sonido");
-                ui.label(RichText::new("La tablatura no cambia: sirve para tocar con capo o con otra afinación.").size(12.0).color(theme::MUTED));
+                ui.label("Transpose the sound");
+                ui.label(RichText::new("The tab stays the same; the staff follows the new pitch.").size(12.0).color(theme::MUTED));
                 let mut n = self.player.transpose;
                 ui.spacing_mut().slider_width = 200.0;
-                let changed = ui.add(egui::Slider::new(&mut n, -12..=12).suffix(" semitonos")).changed();
+                let changed = ui.add(egui::Slider::new(&mut n, -12..=12).suffix(" semitones")).changed();
+                let meaning = match self.player.transpose {
+                    0 => "No transposition".to_string(),
+                    t if t < 0 => format!("Like tuning the guitar {} semitone(s) lower", -t),
+                    t => format!("Like a capo on fret {t}"),
+                };
+                ui.label(RichText::new(meaning).size(12.0).color(theme::ACCENT));
                 ui.horizontal(|ui| {
                     let mut set = changed;
                     if ui.button("−1").clicked() {
@@ -457,7 +463,7 @@ impl App {
                         n += 1;
                         set = true;
                     }
-                    if ui.add_enabled(self.player.transpose != 0, egui::Button::new("Restablecer")).clicked() {
+                    if ui.add_enabled(self.player.transpose != 0, egui::Button::new("Reset")).clicked() {
                         n = 0;
                         set = true;
                     }
@@ -467,26 +473,26 @@ impl App {
                 });
             });
             let (trainer_on, ..) = self.player.trainer();
-            let trainer_btn = theme::icon_label(ui, Some(Icon::Trend), "Entrenador", trainer_on, true, false);
+            let trainer_btn = theme::icon_label(ui, Some(Icon::Trend), "Trainer", trainer_on, true, false);
             egui::Popup::menu(&trainer_btn).show(|ui| {
                 let (mut on, mut step, mut max) = self.player.trainer();
-                ui.label("Con un bucle activo, la velocidad sube en cada vuelta.");
-                let mut changed = ui.checkbox(&mut on, "Activar").changed();
-                changed |= ui.add(egui::Slider::new(&mut step, 1..=25).suffix("%").text("Paso")).changed();
-                changed |= ui.add(egui::Slider::new(&mut max, 30..=150).suffix("%").text("Máximo")).changed();
+                ui.label("With an active loop, the speed rises on every pass.");
+                let mut changed = ui.checkbox(&mut on, "Enable").changed();
+                changed |= ui.add(egui::Slider::new(&mut step, 1..=25).suffix("%").text("Step")).changed();
+                changed |= ui.add(egui::Slider::new(&mut max, 30..=150).suffix("%").text("Max")).changed();
                 if changed {
                     self.player.set_trainer(on, step, max);
                 }
             });
-            if theme::chip(ui, Icon::Follow, self.follow, "Seguir").on_hover_text("Desplazar la partitura con la reproducción").clicked() {
+            if theme::chip(ui, Icon::Follow, self.follow, "Follow").on_hover_text("Scroll the score along with playback").clicked() {
                 self.follow = !self.follow;
             }
             match &self.player.status {
                 Status::NoSoundFont => {
-                    ui.colored_label(theme::DANGER, "Sin SoundFont: elegí un .sf2 en «Más»");
+                    ui.colored_label(theme::DANGER, "No SoundFont: choose a .sf2 under “More”");
                 }
                 Status::Loading(_) => {
-                    ui.weak("Cargando SoundFont…");
+                    ui.weak("Loading SoundFont…");
                 }
                 Status::Error(e) => {
                     ui.colored_label(theme::DANGER, e);
@@ -514,10 +520,10 @@ impl eframe::App for App {
                 Ok(result) => {
                     self.export_job = None;
                     match result {
-                        Ok(()) => self.notice = Some("Audio exportado".into()),
+                        Ok(()) => self.notice = Some("Audio exported".into()),
                         Err(e) => {
                             self.notice = None;
-                            self.error = Some(format!("No se pudo exportar: {e}"));
+                            self.error = Some(format!("Export failed: {e}"));
                         }
                     }
                 }
@@ -649,26 +655,26 @@ impl eframe::App for App {
                     if list.is_empty() {
                         list.push(selected);
                     }
-                    action = tab_view::show(ui, song, &list, self.zoom, scroll_to, playhead, self.player.loop_measures, self.show_staff);
+                    action = tab_view::show(ui, song, &list, self.zoom, scroll_to, playhead, self.player.loop_measures, self.show_staff, self.player.transpose);
                 }
                 None => {
-                    ui.label("El archivo no tiene pistas.");
+                    ui.label("The file has no tracks.");
                 }
             },
             None => {
                 ui.vertical_centered(|ui| {
                     ui.add_space((ui.available_height() * 0.28).max(20.0));
                     ui.label(RichText::new("NeoGuitar").size(38.0).strong().color(theme::TEXT));
-                    ui.label(RichText::new("Lector y reproductor de tablaturas Guitar Pro").size(15.0).color(theme::MUTED));
+                    ui.label(RichText::new("Guitar Pro tab reader and player").size(15.0).color(theme::MUTED));
                     ui.add_space(18.0);
-                    if theme::primary_button(ui, "Abrir un archivo…").clicked() {
+                    if theme::primary_button(ui, "Open a file…").clicked() {
                         pick_request = true;
                     }
                     ui.add_space(6.0);
-                    ui.label(RichText::new("o arrastrá aquí un .gp3 · .gp4 · .gp5 · .gpx · .gp").size(12.5).color(theme::MUTED));
+                    ui.label(RichText::new("or drag a .gp3 · .gp4 · .gp5 · .gpx · .gp file here").size(12.5).color(theme::MUTED));
                     if !self.settings.recent.is_empty() {
                         ui.add_space(22.0);
-                        theme::section(ui, "Recientes");
+                        theme::section(ui, "Recent");
                         for p in self.settings.recent.iter().take(6) {
                             let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| p.display().to_string());
                             if ui.add(egui::Button::new(name).min_size(egui::vec2(280.0, 30.0))).on_hover_text(p.display().to_string()).clicked() {
@@ -707,7 +713,7 @@ impl eframe::App for App {
 }
 
 fn track_label(t: &neoguitar::model::Track) -> String {
-    let name = if t.name.trim().is_empty() { "(sin nombre)" } else { t.name.trim() };
+    let name = if t.name.trim().is_empty() { "(unnamed)" } else { t.name.trim() };
     format!("{}. {}", t.number, name)
 }
 
@@ -717,7 +723,7 @@ fn side_info(ui: &mut egui::Ui, song: &Song, path: Option<&Path>, selected: &mut
         if let Some(p) = path.and_then(|p| p.file_name()) {
             ui.label(RichText::new(p.to_string_lossy()).size(11.0).color(theme::MUTED));
         }
-        let title = if song.title.trim().is_empty() { "(sin título)" } else { song.title.trim() };
+        let title = if song.title.trim().is_empty() { "(untitled)" } else { song.title.trim() };
         ui.label(RichText::new(title).size(20.0).strong());
         let by: Vec<&str> = [song.artist.trim(), song.album.trim()].into_iter().filter(|s| !s.is_empty()).collect();
         if !by.is_empty() {
@@ -728,13 +734,13 @@ fn side_info(ui: &mut egui::Ui, song: &Song, path: Option<&Path>, selected: &mut
             ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
             theme::pill(ui, &song.format.to_string());
             theme::pill(ui, &format!("{} BPM", song.tempo));
-            theme::pill(ui, &format!("{} compases", song.headers.len()));
+            theme::pill(ui, &format!("{} measures", song.headers.len()));
         });
         let extra: Vec<(&str, &str)> = [
-            ("Subtítulo", song.subtitle.trim()),
-            ("Letra", song.words.trim()),
-            ("Música", song.music.trim()),
-            ("Tab por", song.tab_by.trim()),
+            ("Subtitle", song.subtitle.trim()),
+            ("Words", song.words.trim()),
+            ("Music", song.music.trim()),
+            ("Tabbed by", song.tab_by.trim()),
             ("Copyright", song.copyright.trim()),
         ]
         .into_iter()
@@ -742,7 +748,7 @@ fn side_info(ui: &mut egui::Ui, song: &Song, path: Option<&Path>, selected: &mut
         .collect();
         if !extra.is_empty() || !song.comments.trim().is_empty() {
             ui.add_space(2.0);
-            ui.collapsing("Detalles", |ui| {
+            ui.collapsing("Details", |ui| {
                 for (k, v) in &extra {
                     ui.label(RichText::new(format!("{k}: {v}")).size(12.5).color(theme::MUTED));
                 }
@@ -753,10 +759,10 @@ fn side_info(ui: &mut egui::Ui, song: &Song, path: Option<&Path>, selected: &mut
         }
     });
 
-    theme::section(ui, "Pistas");
+    theme::section(ui, "Tracks");
     for (i, t) in song.tracks.iter().enumerate() {
         let tuning = if t.is_percussion {
-            "percusión".to_string()
+            "percussion".to_string()
         } else {
             let notes = t.strings.iter().map(|&m| midi_note_name(m)).collect::<Vec<_>>().join(" ");
             if t.capo > 0 { format!("{notes} · capo {}", t.capo) } else { notes }
@@ -790,24 +796,24 @@ fn side_info(ui: &mut egui::Ui, song: &Song, path: Option<&Path>, selected: &mut
                 });
                 let on = player.track_enabled(i);
                 let (mute_icon, mute_style) = if on { (Icon::Speaker, IconStyle::Flat) } else { (Icon::SpeakerOff, IconStyle::Danger) };
-                let mute_tip = if on { "Silenciar la pista" } else { "Pista silenciada: clic para activarla" };
+                let mute_tip = if on { "Mute track" } else { "Track muted: click to unmute" };
                 if theme::icon_button(ui, mute_icon, 24.0, mute_style, true).on_hover_text(mute_tip).clicked() {
                     player.set_track_enabled(i, !on);
                 }
                 let solo = on && song.tracks.len() > 1 && (0..song.tracks.len()).all(|k| k == i || !player.track_enabled(k));
                 let solo_style = if solo { IconStyle::FlatOn } else { IconStyle::Flat };
-                if theme::icon_button(ui, Icon::Headphones, 24.0, solo_style, true).on_hover_text("Solo: escuchar solo esta pista").clicked() {
+                if theme::icon_button(ui, Icon::Headphones, 24.0, solo_style, true).on_hover_text("Solo: hear only this track").clicked() {
                     player.toggle_solo(i, song.tracks.len());
                 }
                 let mix_on = *mixer_open == Some(i);
                 let mix_style = if mix_on { IconStyle::FlatOn } else { IconStyle::Flat };
-                if theme::icon_button(ui, Icon::Sliders, 24.0, mix_style, true).on_hover_text("Mezcla de la pista: instrumento, paneo y reverb").clicked() {
+                if theme::icon_button(ui, Icon::Sliders, 24.0, mix_style, true).on_hover_text("Track mix: instrument, pan and reverb").clicked() {
                     *mixer_open = if mix_on { None } else { Some(i) };
                 }
                 if multi {
                     if let Some(v) = visible.get_mut(i) {
                         let style = if *v { IconStyle::FlatOn } else { IconStyle::Flat };
-                        if theme::icon_button(ui, Icon::Eye, 24.0, style, true).on_hover_text("Mostrar en la vista multipista").clicked() {
+                        if theme::icon_button(ui, Icon::Eye, 24.0, style, true).on_hover_text("Show in the multi-track view").clicked() {
                             *v = !*v;
                         }
                     }
@@ -817,7 +823,7 @@ fn side_info(ui: &mut egui::Ui, song: &Song, path: Option<&Path>, selected: &mut
                 ui.label(RichText::new(&tuning).size(11.5).color(theme::MUTED));
                 let mut gain = player.track_gain(i) as u32;
                 ui.spacing_mut().slider_width = (ui.available_width() - 12.0).max(40.0);
-                if ui.add(egui::Slider::new(&mut gain, 0..=200).show_value(false)).on_hover_text(format!("Volumen de la pista: {gain}%")).changed() {
+                if ui.add(egui::Slider::new(&mut gain, 0..=200).show_value(false)).on_hover_text(format!("Track volume: {gain}%")).changed() {
                     player.set_track_gain(i, gain as u8);
                 }
             });
@@ -840,7 +846,7 @@ fn mixer_controls(ui: &mut egui::Ui, i: usize, t: &neoguitar::model::Track, play
 
     if !t.is_percussion {
         let program = prog_o.unwrap_or(t.program.clamp(0, 127) as u8) as usize;
-        label(ui, "Instrumento");
+        label(ui, "Instrument");
         egui::ComboBox::from_id_salt(("instrumento", i)).width(ui.available_width() - 8.0).selected_text(neoguitar::gm::NAMES[program.min(127)]).show_ui(ui, |ui| {
             egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
                 for (k, name) in neoguitar::gm::NAMES.iter().enumerate() {
@@ -854,14 +860,14 @@ fn mixer_controls(ui: &mut egui::Ui, i: usize, t: &neoguitar::model::Track, play
     }
 
     let mut pan = pan_o.unwrap_or(t.pan.min(127));
-    label(ui, "Paneo");
+    label(ui, "Pan");
     ui.spacing_mut().slider_width = (ui.available_width() - 110.0).max(60.0);
     let pan_fmt = |v: f64, _: std::ops::RangeInclusive<usize>| {
         let d = (v - 64.0).round() as i32;
         match d {
-            -1..=1 => "Centro".to_string(),
-            d if d < 0 => format!("Izq. {}", -d * 100 / 64),
-            d => format!("Der. {}", d * 100 / 63),
+            -1..=1 => "Center".to_string(),
+            d if d < 0 => format!("L {}", -d * 100 / 64),
+            d => format!("R {}", d * 100 / 63),
         }
     };
     if ui.add(egui::Slider::new(&mut pan, 0..=127).custom_formatter(pan_fmt)).changed() {
@@ -877,7 +883,7 @@ fn mixer_controls(ui: &mut egui::Ui, i: usize, t: &neoguitar::model::Track, play
     }
 
     let customized = pan_o.is_some() || prog_o.is_some() || rev_o.is_some();
-    if ui.add_enabled(customized, egui::Button::new("Restablecer")).on_hover_text("Volver a los valores del archivo").clicked() {
+    if ui.add_enabled(customized, egui::Button::new("Reset")).on_hover_text("Back to the file’s values").clicked() {
         (pan_o, prog_o, rev_o) = (None, None, None);
         changed = true;
     }
@@ -897,12 +903,12 @@ fn sections_panel(ui: &mut egui::Ui, song: &Song, player: &Player, jump: &mut Op
     if sections.is_empty() {
         return;
     }
-    theme::section(ui, &format!("Secciones ({})", sections.len()));
+    theme::section(ui, &format!("Sections ({})", sections.len()));
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
         for (i, name) in sections {
             let label = format!("{name} · {}", i + 1);
-            if theme::icon_label(ui, None, &label, false, true, false).on_hover_text(format!("Ir al compás {}", i + 1)).clicked() {
+            if theme::icon_label(ui, None, &label, false, true, false).on_hover_text(format!("Go to measure {}", i + 1)).clicked() {
                 if let Some(t) = player.timeline.time_of_measure(i) {
                     player.seek(t);
                 }
@@ -940,7 +946,7 @@ fn chords_panel(ui: &mut egui::Ui, song: &Song) {
         return;
     }
     ui.separator();
-    egui::CollapsingHeader::new(format!("Acordes ({})", chords.len())).default_open(std::env::var_os("NEOGUITAR_OPEN_CHORDS").is_some()).show(ui, |ui| {
+    egui::CollapsingHeader::new(format!("Chords ({})", chords.len())).default_open(std::env::var_os("NEOGUITAR_OPEN_CHORDS").is_some()).show(ui, |ui| {
         ui.horizontal_wrapped(|ui| {
             for c in chords.iter().take(60) {
                 chord_diagram(ui, c);

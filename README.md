@@ -2,73 +2,76 @@
 
 # NeoGuitar
 
-Lector, visor y reproductor de tablaturas **Guitar Pro** escrito en Rust, con interfaz en [egui](https://github.com/emilk/egui).
+A **Guitar Pro** tab reader, viewer and player written in Rust, with a UI built on [egui](https://github.com/emilk/egui).
 
-## Qué hace
+## Features
 
-- **Formatos:** GP3, GP4, GP5, GP6 (`.gpx`) y GP7/8 (`.gp`). El formato se detecta por el contenido del archivo.
-- **Tablatura y pentagrama** (notación estándar con la fuente Bravura): ligaduras, plicas y barras, silencios, armadura, acordes con diagrama y letra.
-- **Técnicas expresivas:** bends, barra de trémolo, slides, hammer-on/pull-off, vibrato, armónicos, trinos, notas de adorno, tremolo picking, notas muertas y ligadas.
-- **Reproducción** con un SoundFont (`.sf2`): repeticiones y finales alternativos, cambios de tempo, swing, pitch bend, solo/silenciar y volumen por pista, metrónomo, cuenta regresiva, bucle de compases, velocidad ajustable y **entrenador de velocidad** (sube el tempo en cada vuelta del bucle).
-- **Transposición** del sonido (±12 semitonos) y **mezclador por pista** (instrumento, paneo, reverb).
-- **Vista multipista:** varias pistas a la vez en el mismo sistema.
-- **Mástil virtual:** muestra en el brazo de la guitarra las notas que suenan.
-- **Secciones:** salto rápido a Intro, Verso, Coro… según los marcadores del archivo.
-- **Exportación:** audio (WAV), MIDI y tablatura en texto.
-- Ajustes persistentes (zoom, velocidad, archivos recientes, SoundFont…).
+- **Formats:** GP3, GP4, GP5, GP6 (`.gpx`) and GP7/8 (`.gp`). The format is detected from the file contents.
+- **Tablature and standard notation** (Bravura music font): ties, stems and beams, rests, key signatures, chord diagrams and lyrics.
+- **Expressive techniques:** bends, tremolo bar, slides, hammer-ons/pull-offs, vibrato, harmonics, trills, grace notes, tremolo picking, dead notes and let ring.
+- **Playback** with a SoundFont (`.sf2`): repeats and alternate endings, tempo changes, swing, pitch bend, per-track solo / mute / volume, metronome, count-in, measure loop, adjustable speed and a **speed trainer** (raises the tempo on every pass of the loop).
+- **Transposition** of the sound (±12 semitones): the tab stays the same (like a capo or a different tuning) and the staff follows the new pitch.
+- **Track mixer:** instrument (all 128 General MIDI sounds), pan and reverb per track, applied live.
+- **Virtual fretboard:** shows the sounding notes on the guitar neck.
+- **Sections:** jump to Intro, Verse, Chorus… from the markers stored in the file.
+- **Multi-track view:** several tracks stacked in the same system.
+- **Export:** audio (WAV), MIDI and plain-text tab.
+- Persistent settings (zoom, speed, recent files, SoundFont…).
 
-## Instalación
+## Installation
 
-Descarga el instalador (`NeoGuitar-x.y.z-setup.exe`) o el zip portable desde [Releases](https://github.com/Fiambre/NeoGuitar/releases). El instalador no pide permisos de administrador (se puede elegir instalar para todos los usuarios) e incluye una casilla opcional para **asociar los archivos .gp3, .gp4, .gp5, .gpx y .gp con NeoGuitar**. Más adelante también se puede hacer desde la aplicación: **Más → Asociar archivos Guitar Pro**.
+Download the installer (`NeoGuitar-x.y.z-setup.exe`) or the portable zip from [Releases](https://github.com/Fiambre/NeoGuitar/releases). The installer does not need administrator rights (you can choose to install for all users) and has an optional checkbox to **associate .gp3, .gp4, .gp5, .gpx and .gp files with NeoGuitar**. You can also do that later from the app: **More → Associate Guitar Pro files**.
 
-## Compilar y ejecutar
+The installer is not code-signed, so Windows SmartScreen will warn about an unknown publisher: click “More info” and then “Run anyway”.
 
-Requiere [Rust](https://rustup.rs) (edición 2024).
+## Build and run
+
+Requires [Rust](https://rustup.rs) (2024 edition).
 
 ```
-cargo run --release -- archivo.gp5
+cargo run --release -- file.gp5
 ```
 
-También puedes abrir un archivo desde la aplicación (Ctrl+O) o arrastrarlo a la ventana.
+You can also open a file from the app (Ctrl+O) or drag it onto the window.
 
 ### SoundFont
 
-El repositorio incluye [GeneralUser GS](https://schristiancollins.com/generaluser.php) en `soundfonts/` (licencia en `soundfonts/LICENSE-GeneralUser-GS.txt`), así que el audio funciona al compilar. NeoGuitar busca un `.sf2` en una carpeta `soundfonts/` junto al ejecutable o al directorio de trabajo, o en la variable `NEOGUITAR_SOUNDFONT`; también puedes elegir otro desde **Más → Elegir SoundFont…**.
+The repository includes [GeneralUser GS](https://schristiancollins.com/generaluser.php) in `soundfonts/` (license in `soundfonts/LICENSE-GeneralUser-GS.txt`), so audio works out of the box. NeoGuitar looks for a `.sf2` in a `soundfonts/` folder next to the executable or the working directory, or in the `NEOGUITAR_SOUNDFONT` environment variable; you can also pick another one from **More → Choose SoundFont…**.
 
-### Atajos
+### Shortcuts
 
-| Tecla | Acción |
+| Key | Action |
 |---|---|
-| `Espacio` | Reproducir / pausar |
-| `Inicio` | Detener y volver al principio |
-| `M` | Metrónomo |
-| `Ctrl+O` | Abrir archivo |
-| Clic derecho sobre un compás | Definir el bucle |
+| `Space` | Play / pause |
+| `Home` | Stop and go back to the start |
+| `M` | Metronome |
+| `Ctrl+O` | Open a file |
+| Right-click a measure | Set the loop |
 
-## Pruebas
+## Tests
 
 ```
 cargo test --release
 ```
 
-`samples/extra/` contiene archivos de prueba de [PyGuitarPro](https://github.com/Perlence/PyGuitarPro) y `tests/reference.rs` compara el resultado de la lectura con esa implementación de referencia (`tests/fixtures/dump_ref.py` regenera los datos).
-Las tablaturas de canciones usadas en otras pruebas no se incluyen por sus derechos de autor; esos tests se omiten si faltan.
+`samples/extra/` contains test files from [PyGuitarPro](https://github.com/Perlence/PyGuitarPro), and `tests/reference.rs` compares our parser against that reference implementation (`tests/fixtures/dump_ref.py` regenerates the data).
+Song tabs used by some other tests are not included because of copyright; those tests are skipped when the files are missing.
 
-## Publicar una versión
+## Releasing a version
 
-Una etiqueta `vX.Y.Z` dispara el workflow *Release* (`.github/workflows/release.yml`): ejecuta las pruebas, compila, genera el instalador con [Inno Setup](https://jrsoftware.org/isinfo.php) (`installer/neoguitar.iss`) y el zip portable, y los adjunta a un release en GitHub. El workflow *CI* compila y prueba en cada push y pull request.
+Pushing a `vX.Y.Z` tag triggers the *Release* workflow (`.github/workflows/release.yml`): it runs the tests, builds, creates the installer with [Inno Setup](https://jrsoftware.org/isinfo.php) (`installer/neoguitar.iss`) and a portable zip, and attaches both to a GitHub release. The *CI* workflow builds and tests on every push and pull request.
 
 ```
- git tag v0.1.0
- git push origin v0.1.0
+git tag v0.1.0
+git push origin v0.1.0
 ```
 
-## Licencia y créditos
+## License and credits
 
-NeoGuitar se distribuye bajo **LGPL-2.1 o posterior** (ver `LICENSE`).
+NeoGuitar is distributed under **LGPL-2.1 or later** (see `LICENSE`).
 
-- Los lectores de GP3–GP7 (`src/gp.rs`, `src/gpx.rs`) son una adaptación a Rust del código de [TuxGuitar](https://github.com/helge17/tuxguitar) (LGPL).
-- Fuente de notación [Bravura](https://github.com/steinbergmedia/bravura) (SIL Open Font License, ver `assets/fonts/OFL.txt`).
-- Archivos de prueba de [PyGuitarPro](https://github.com/Perlence/PyGuitarPro) (LGPL-3.0).
-- SoundFont [GeneralUser GS](https://schristiancollins.com/generaluser.php) de S. Christian Collins (licencia propia, permite su uso y redistribución en proyectos de software).
-- Síntesis con [rustysynth](https://github.com/sinshu/rustysynth), audio con [cpal](https://github.com/RustAudio/cpal).
+- The GP3–GP7 readers (`src/gp.rs`, `src/gpx.rs`) are a Rust adaptation of the code from [TuxGuitar](https://github.com/helge17/tuxguitar) (LGPL).
+- [Bravura](https://github.com/steinbergmedia/bravura) notation font (SIL Open Font License, see `assets/fonts/OFL.txt`).
+- Test files from [PyGuitarPro](https://github.com/Perlence/PyGuitarPro) (LGPL-3.0).
+- [GeneralUser GS](https://schristiancollins.com/generaluser.php) SoundFont by S. Christian Collins (its own license, which allows use and redistribution in software projects).
+- Synthesis with [rustysynth](https://github.com/sinshu/rustysynth), audio with [cpal](https://github.com/RustAudio/cpal).

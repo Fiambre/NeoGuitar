@@ -1,7 +1,7 @@
 name: Release
 
-# Al publicar una etiqueta vX.Y.Z se compila, se genera el instalador y se crea el release en GitHub.
-# También se puede lanzar a mano (workflow_dispatch): genera los archivos como artefactos, sin crear release.
+# Pushing a vX.Y.Z tag builds, creates the installer and publishes a GitHub release.
+# It can also be run by hand (workflow_dispatch): it produces the files as artifacts without creating a release.
 on:
   push:
     tags: ["v*"]
@@ -18,7 +18,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
 
-      - name: Versión
+      - name: Version
         id: ver
         shell: pwsh
         run: |
@@ -26,26 +26,26 @@ jobs:
           else { $v = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value }
           "version=$v" >> $env:GITHUB_OUTPUT
 
-      - name: Pruebas
+      - name: Test
         run: cargo test --release
 
-      - name: Compilar
+      - name: Build
         run: cargo build --release
 
-      - name: Instalar Inno Setup
+      - name: Install Inno Setup
         shell: pwsh
         run: |
           if (-not (Get-Command iscc -ErrorAction SilentlyContinue)) { choco install innosetup -y --no-progress }
 
-      - name: Generar instalador
+      - name: Build installer
         shell: pwsh
         run: |
           $iscc = (Get-Command iscc -ErrorAction SilentlyContinue).Source
           if (-not $iscc) { $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
           & $iscc "/DAppVersion=${{ steps.ver.outputs.version }}" installer\neoguitar.iss
-          if ($LASTEXITCODE -ne 0) { throw "ISCC falló" }
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed" }
 
-      - name: Versión portable (zip)
+      - name: Portable version (zip)
         shell: pwsh
         run: |
           $dir = "dist\NeoGuitar-${{ steps.ver.outputs.version }}-portable"
@@ -62,7 +62,7 @@ jobs:
             dist/*-setup.exe
             dist/*-portable.zip
 
-      - name: Publicar release
+      - name: Publish release
         if: github.ref_type == 'tag'
         uses: softprops/action-gh-release@v2
         with:

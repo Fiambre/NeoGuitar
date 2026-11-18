@@ -107,6 +107,7 @@ pub fn show(
     playhead: Option<(usize, u64)>,
     loop_range: Option<(usize, usize)>,
     show_staff: bool,
+    transpose: i32,
 ) -> Option<ViewAction> {
     let colors = Colors::new(ui);
     let mut action = None;
@@ -155,7 +156,7 @@ pub fn show(
             if !ui.is_rect_visible(rect) {
                 continue;
             }
-            let ctx = SystemContext { c: &colors, song, tracks, staff_flags: &staff_flags, lyric_maps: &lyric_maps, heights: &heights, zoom, playhead, loop_range, any_staff };
+            let ctx = SystemContext { c: &colors, song, tracks, staff_flags: &staff_flags, lyric_maps: &lyric_maps, heights: &heights, zoom, playhead, loop_range, any_staff, transpose };
             let extents = draw_system(ui, &ctx, system, rect);
             let measure_at = |pos: Pos2| extents.iter().find(|(_, x0, x1)| pos.x >= *x0 && pos.x < *x1).map(|e| e.0);
             if response.clicked() {
@@ -172,21 +173,21 @@ pub fn show(
             response.context_menu(|ui| {
                 let m: Option<usize> = ui.data(|d| d.get_temp(egui::Id::unique("ctx_measure")));
                 if let Some(m) = m {
-                    ui.label(format!("Compás {}", m + 1));
-                    if ui.button("▶ Reproducir desde aquí").clicked() {
+                    ui.label(format!("Measure {}", m + 1));
+                    if ui.button("▶ Play from here").clicked() {
                         action = Some(ViewAction::Seek(m));
                         ui.close();
                     }
-                    if ui.button("🔁 Bucle: empezar aquí").clicked() {
+                    if ui.button("🔁 Loop: start here").clicked() {
                         action = Some(ViewAction::LoopFrom(m));
                         ui.close();
                     }
-                    if ui.button("🔁 Bucle: terminar aquí").clicked() {
+                    if ui.button("🔁 Loop: end here").clicked() {
                         action = Some(ViewAction::LoopTo(m));
                         ui.close();
                     }
                 }
-                if ui.button("✖ Quitar bucle").clicked() {
+                if ui.button("✖ Clear loop").clicked() {
                     action = Some(ViewAction::ClearLoop);
                     ui.close();
                 }
@@ -249,6 +250,8 @@ struct SystemContext<'a> {
     playhead: Option<(usize, u64)>,
     loop_range: Option<(usize, usize)>,
     any_staff: bool,
+    /// Semitonos de transposición del sonido (el pentagrama se escribe a la altura que suena).
+    transpose: i32,
 }
 
 /// Dibuja un sistema: una pista tras otra, apiladas, con un corchete que las agrupa.
@@ -306,7 +309,7 @@ fn draw_block(
     // Nombre de la pista (solo cuando hay varias a la vez).
     if ctx.tracks.len() > 1 {
         let [r, g, b] = track.color;
-        let name = if track.name.trim().is_empty() { format!("Pista {}", track.number) } else { track.name.trim().to_string() };
+        let name = if track.name.trim().is_empty() { format!("Track {}", track.number) } else { track.name.trim().to_string() };
         p.text(
             Pos2::new(rect.left() + 3.0 * zoom, rect.top() + 2.0 * zoom),
             Align2::LEFT_TOP,
@@ -317,7 +320,7 @@ fn draw_block(
     }
     if staff_on {
         if let Some(first) = system.first() {
-            staff::draw_head(&p, &staff_colors, &staff_geo, track.clef, song.headers[first.index].key_signature, rect.left(), left);
+            staff::draw_head(&p, &staff_colors, &staff_geo, track.clef, staff::transposed_key(song.headers[first.index].key_signature, ctx.transpose), rect.left(), left);
             // Corchete que une el pentagrama con su tablatura.
             let bx = left - 5.0 * zoom;
             p.line_segment([Pos2::new(bx, staff_geo.top), Pos2::new(bx, bottom)], Stroke::new(2.5 * zoom, c.fg));
@@ -419,9 +422,9 @@ fn draw_block(
             // Armadura (se muestra al inicio y cuando cambia).
             let prev_key = l.index.checked_sub(1).map(|j| song.headers[j].key_signature).unwrap_or(0);
             if header.key_signature != prev_key || (l.index == 0 && header.key_signature != 0) {
-                let k = header.key_signature;
+                let k = staff::transposed_key(header.key_signature, ctx.transpose);
                 let label = if k > 0 { format!("{k}#") } else { format!("{}b", -k) };
-                p.text(Pos2::new(x0 + 22.0 * zoom, top - 10.0 * zoom), Align2::LEFT_BOTTOM, format!("Tono: {label}"), font(8.5, zoom), c.weak);
+                p.text(Pos2::new(x0 + 22.0 * zoom, top - 10.0 * zoom), Align2::LEFT_BOTTOM, format!("Key: {label}"), font(8.5, zoom), c.weak);
             }
 
         }
@@ -437,7 +440,7 @@ fn draw_block(
         // Pulsos.
         let xs: Vec<f32> = l.beat_x[track_pos].iter().map(|bx| x0 + bx * stretch).collect();
         if staff_on {
-            staff::draw_measure(&p, &staff_colors, &staff_geo, track, header, measure, &xs, x0, x1, l.show_signature);
+            staff::draw_measure(&p, &staff_colors, &staff_geo, track, header, measure, &xs, x0, x1, l.show_signature, ctx.transpose);
         }
         draw_beats(&p, c, track, measure, &xs, top, bottom, gap, zoom, cursor_tick, &header.tempo_changes, lyrics, l.index);
 

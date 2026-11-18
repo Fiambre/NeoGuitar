@@ -1,7 +1,7 @@
-"""Genera el ícono de NeoGuitar (assets/icon/*). Requiere Pillow: pip install pillow
+"""Generates the NeoGuitar icon (assets/icon/*). Requires Pillow: pip install pillow
 
-Diseño: púa de guitarra azul sobre un cuadrado redondeado oscuro, cruzada por las cuerdas de una tablatura.
-Cada tamaño se dibuja por separado (a 8x y se reduce) para que los pequeños queden nítidos.
+Design: a blue guitar pick on a dark rounded square, crossed by the strings of a tab.
+Each size is drawn separately (at 8x, then downscaled) so the small ones stay sharp.
 """
 import os
 from PIL import Image, ImageDraw

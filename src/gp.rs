@@ -20,9 +20,9 @@ pub enum GpError {
 impl fmt::Display for GpError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            GpError::UnsupportedVersion(v) => write!(f, "versión no soportada: {v:?}"),
-            GpError::UnexpectedEof { pos } => write!(f, "fin de archivo inesperado (offset {pos})"),
-            GpError::Invalid(m) => write!(f, "archivo inválido: {m}"),
+            GpError::UnsupportedVersion(v) => write!(f, "unsupported version: {v:?}"),
+            GpError::UnexpectedEof { pos } => write!(f, "unexpected end of file (offset {pos})"),
+            GpError::Invalid(m) => write!(f, "invalid file: {m}"),
         }
     }
 }
@@ -89,7 +89,7 @@ impl<'a> Reader<'a> {
     /// bytes (o `len` si `size <= 0`) y se usan los primeros `len`.
     fn string_raw(&mut self, size: i32, len: i32) -> Res<String> {
         let n = if size > 0 { size } else { len };
-        let n = usize::try_from(n).map_err(|_| GpError::Invalid(format!("largo de texto negativo ({n})")))?;
+        let n = usize::try_from(n).map_err(|_| GpError::Invalid(format!("negative text length ({n})")))?;
         let bytes = self.take(n)?;
         let used = if len >= 0 && (len as usize) <= n { len as usize } else { n };
         Ok(decode(&bytes[..used]))
@@ -202,8 +202,8 @@ impl<'a> Parser<'a> {
             self.r.skip(42)?;
         }
 
-        let measures = self.count("compases", 1 << 14)?;
-        let tracks = self.count("pistas", 256)?;
+        let measures = self.count("measures", 1 << 14)?;
+        let tracks = self.count("tracks", 256)?;
 
         self.key_sigs = vec![0; measures];
         if measures > 0 {
@@ -219,7 +219,7 @@ impl<'a> Parser<'a> {
     fn count(&mut self, what: &str, max: i32) -> Res<usize> {
         let n = self.r.i32()?;
         if !(0..=max).contains(&n) {
-            return Err(GpError::Invalid(format!("cantidad de {what} fuera de rango ({n})")));
+            return Err(GpError::Invalid(format!("{what} count out of range ({n})")));
         }
         Ok(n as usize)
     }
@@ -239,7 +239,7 @@ impl<'a> Parser<'a> {
         song.instructions = r.str_bsi()?;
         let n = r.i32()?;
         if !(0..=4096).contains(&n) {
-            return Err(GpError::Invalid(format!("cantidad de comentarios fuera de rango ({n})")));
+            return Err(GpError::Invalid(format!("comment line count out of range ({n})")));
         }
         let mut lines = Vec::new();
         for _ in 0..n {
@@ -337,7 +337,7 @@ impl<'a> Parser<'a> {
         if flags & 0x02 != 0 {
             let d = self.r.i8()?;
             if d <= 0 {
-                return Err(GpError::Invalid(format!("denominador de compás inválido ({d})")));
+                return Err(GpError::Invalid(format!("invalid time signature denominator ({d})")));
             }
             *den = d as u8;
         }
@@ -433,7 +433,7 @@ impl<'a> Parser<'a> {
         let name = self.r.str_byte(40)?;
         let string_count = self.r.i32()?;
         if !(0..=7).contains(&string_count) {
-            return Err(GpError::Invalid(format!("cantidad de cuerdas fuera de rango ({string_count})")));
+            return Err(GpError::Invalid(format!("string count out of range ({string_count})")));
         }
         let mut strings = Vec::new();
         for i in 0..7 {
@@ -595,7 +595,7 @@ impl<'a> Parser<'a> {
         let b = self.r.i8()? as i32;
         let shift = b + 4;
         if !(2..=9).contains(&shift) {
-            return Err(GpError::Invalid(format!("duración inválida ({b})")));
+            return Err(GpError::Invalid(format!("invalid duration ({b})")));
         }
         let mut d = Duration { value: (1u32 << shift) / 4, dotted: flags & 0x01 != 0, double_dotted: false, enters: 1, times: 1 };
         if flags & 0x20 != 0 {

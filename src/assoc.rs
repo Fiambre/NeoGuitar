@@ -22,7 +22,7 @@ fn reg(args: &[&str]) -> Result<String, String> {
 pub fn associate() -> Result<(), String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?.display().to_string();
     let prog = format!(r"{BASE}\{PROG_ID}");
-    reg(&["add", &prog, "/ve", "/d", "Archivo Guitar Pro", "/f"])?;
+    reg(&["add", &prog, "/ve", "/d", "Guitar Pro file", "/f"])?;
     reg(&["add", &format!(r"{prog}\DefaultIcon"), "/ve", "/d", &format!("\"{exe}\",0"), "/f"])?;
     reg(&["add", &format!(r"{prog}\shell\open\command"), "/ve", "/d", &format!("\"{exe}\" \"%1\""), "/f"])?;
     for ext in EXTENSIONS {

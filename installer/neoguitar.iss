@@ -1,6 +1,6 @@
-; Instalador de NeoGuitar (Inno Setup 6).
-; Compilar: iscc /DAppVersion=0.1.0 installer\neoguitar.iss   (genera dist\NeoGuitar-<versión>-setup.exe)
-; Requiere haber compilado antes: cargo build --release
+; NeoGuitar installer (Inno Setup 6).
+; Build: iscc /DAppVersion=0.1.0 installer\neoguitar.iss   (creates dist\NeoGuitar-<version>-setup.exe)
+; Requires a previous: cargo build --release
 
 #ifndef AppVersion
   #define AppVersion "0.1.0"
@@ -28,7 +28,7 @@ SolidCompression=yes
 WizardStyle=modern
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
-; Por defecto se instala solo para el usuario (sin permisos de administrador); el asistente permite elegir para todos.
+; Installs for the current user by default (no administrator rights); the wizard lets you choose all users.
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 ChangesAssociations=yes
@@ -36,12 +36,11 @@ UninstallDisplayIcon={app}\{#AppExe}
 SetupIconFile=..\assets\icon\neoguitar.ico
 
 [Languages]
-Name: "spanish"; MessagesFile: "compiler:Languages\Spanish.isl"
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
-Name: "assoc"; Description: "Asociar los archivos Guitar Pro (.gp3, .gp4, .gp5, .gpx, .gp) con NeoGuitar"; GroupDescription: "Asociaciones de archivo:"
-Name: "desktopicon"; Description: "Crear un icono en el escritorio"; GroupDescription: "Accesos directos:"; Flags: unchecked
+Name: "assoc"; Description: "Associate Guitar Pro files (.gp3, .gp4, .gp5, .gpx, .gp) with NeoGuitar"; GroupDescription: "File associations:"
+Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Shortcuts:"; Flags: unchecked
 
 [Files]
 Source: "..\target\release\{#AppExe}"; DestDir: "{app}"; Flags: ignoreversion
@@ -54,8 +53,8 @@ Name: "{autoprograms}\NeoGuitar"; Filename: "{app}\{#AppExe}"
 Name: "{autodesktop}\NeoGuitar"; Filename: "{app}\{#AppExe}"; Tasks: desktopicon
 
 [Registry]
-; HKA = HKCU si se instala solo para el usuario, HKLM si es para todos.
-Root: HKA; Subkey: "Software\Classes\{#ProgId}"; ValueType: string; ValueName: ""; ValueData: "Archivo Guitar Pro"; Flags: uninsdeletekey; Tasks: assoc
+; HKA = HKCU for a per-user install, HKLM for all users.
+Root: HKA; Subkey: "Software\Classes\{#ProgId}"; ValueType: string; ValueName: ""; ValueData: "Guitar Pro file"; Flags: uninsdeletekey; Tasks: assoc
 Root: HKA; Subkey: "Software\Classes\{#ProgId}\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\{#AppExe},0"; Tasks: assoc
 Root: HKA; Subkey: "Software\Classes\{#ProgId}\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExe}"" ""%1"""; Tasks: assoc
 
@@ -71,4 +70,4 @@ Root: HKA; Subkey: "Software\Classes\.gp"; ValueType: string; ValueName: ""; Val
 Root: HKA; Subkey: "Software\Classes\.gp\OpenWithProgids"; ValueType: none; ValueName: "{#ProgId}"; Flags: uninsdeletevalue; Tasks: assoc
 
 [Run]
-Filename: "{app}\{#AppExe}"; Description: "Abrir NeoGuitar"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#AppExe}"; Description: "Launch NeoGuitar"; Flags: nowait postinstall skipifsilent

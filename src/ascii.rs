@@ -5,16 +5,16 @@ use crate::model::*;
 /// Tablatura ASCII de la pista `track`, con líneas de hasta `width` columnas.
 pub fn ascii_tab(song: &Song, track: &Track, width: usize) -> String {
     let mut out = String::new();
-    let title = if song.title.trim().is_empty() { "(sin título)" } else { song.title.trim() };
+    let title = if song.title.trim().is_empty() { "(untitled)" } else { song.title.trim() };
     out.push_str(&format!("{title}"));
     if !song.artist.trim().is_empty() {
         out.push_str(&format!(" - {}", song.artist.trim()));
     }
     out.push('\n');
-    out.push_str(&format!("Pista {}: {}\n", track.number, track.name.trim()));
+    out.push_str(&format!("Track {}: {}\n", track.number, track.name.trim()));
     if !track.is_percussion {
         let tuning: Vec<String> = track.strings.iter().map(|&m| midi_note_name(m)).collect();
-        out.push_str(&format!("Afinación: {}\n", tuning.join(" ")));
+        out.push_str(&format!("Tuning: {}\n", tuning.join(" ")));
     }
     out.push('\n');
 

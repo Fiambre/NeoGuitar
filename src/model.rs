@@ -304,28 +304,28 @@ pub fn drum_label(midi: u8) -> String {
 /// Nombre completo para leyendas.
 pub fn drum_name(midi: u8) -> Option<&'static str> {
     Some(match midi {
-        35 => "Bombo acústico",
-        36 => "Bombo",
-        37 => "Side stick",
-        38 => "Caja",
-        39 => "Palmas",
-        40 => "Caja eléctrica",
-        41 => "Tom piso bajo",
-        42 => "Hi-hat cerrado",
-        43 => "Tom piso alto",
-        44 => "Hi-hat pedal",
-        45 => "Tom bajo",
-        46 => "Hi-hat abierto",
-        47 => "Tom medio-bajo",
-        48 => "Tom medio-alto",
+        35 => "Acoustic Bass Drum",
+        36 => "Bass Drum",
+        37 => "Side Stick",
+        38 => "Snare",
+        39 => "Hand Clap",
+        40 => "Electric Snare",
+        41 => "Low Floor Tom",
+        42 => "Closed Hi-Hat",
+        43 => "High Floor Tom",
+        44 => "Pedal Hi-Hat",
+        45 => "Low Tom",
+        46 => "Open Hi-Hat",
+        47 => "Low-Mid Tom",
+        48 => "High-Mid Tom",
         49 => "Crash",
-        50 => "Tom alto",
+        50 => "High Tom",
         51 => "Ride",
-        52 => "China",
-        53 => "Campana de ride",
-        54 => "Pandereta",
+        52 => "Chinese Cymbal",
+        53 => "Ride Bell",
+        54 => "Tambourine",
         55 => "Splash",
-        56 => "Cencerro",
+        56 => "Cowbell",
         57 => "Crash 2",
         59 => "Ride 2",
         _ => return None,
@@ -349,4 +349,11 @@ impl Track {
         }
         out
     }
+}
+
+/// Armadura (cantidad de alteraciones: + sostenidos, - bemoles) tras transponer `semitones` semitonos.
+pub fn transpose_key(key: i8, semitones: i32) -> i8 {
+    // Subir un semitono suma 7 quintas; se normaliza al rango -5..=6 para usar pocas alteraciones.
+    let v = (key as i32 + 7 * semitones).rem_euclid(12);
+    (if v > 6 { v - 12 } else { v }) as i8
 }

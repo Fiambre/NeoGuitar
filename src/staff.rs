@@ -148,6 +148,8 @@ impl Geometry {
 }
 
 /// Clave y armadura al inicio de un sistema.
+pub use neoguitar::model::transpose_key as transposed_key;
+
 pub fn draw_head(p: &Painter, c: &StaffColors, g: &Geometry, clef: Clef, key: i8, x: f32, x_end: f32) {
     let sp = g.space();
     for k in 0..5 {
@@ -191,6 +193,7 @@ pub fn draw_measure(
     x0: f32,
     x1: f32,
     show_signature: bool,
+    transpose: i32,
 ) {
     let sp = g.space();
     let zoom = g.zoom;
@@ -211,7 +214,7 @@ pub fn draw_measure(
     }
 
     let d_top = top_line(track.clef);
-    let key = header.key_signature;
+    let key = transposed_key(header.key_signature, transpose);
     // Alteraciones vigentes en el compás, por nota diatónica.
     let mut current: HashMap<i32, i8> = HashMap::new();
     let note_w = 1.18 * sp;
@@ -253,7 +256,7 @@ pub fn draw_measure(
             let mut heads: Vec<(i32, Option<i8>, &Note)> = Vec::new();
             for n in &voice.notes {
                 let Some(&open) = track.strings.get(n.string as usize - 1) else { continue };
-                let sounding = open + track.capo + n.fret as i32;
+                let sounding = open + track.capo + n.fret as i32 + transpose;
                 let written = sounding + 12;
                 let (d, acc) = spell(written, key);
                 let letter = d.rem_euclid(7);

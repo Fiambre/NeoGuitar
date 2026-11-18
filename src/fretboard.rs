@@ -24,7 +24,7 @@ pub fn show(ui: &mut Ui, track: &Track, active: &[(u8, u8)]) {
     let p = ui.painter_at(rect);
 
     if track.is_percussion || track.strings.is_empty() {
-        p.text(rect.center(), Align2::CENTER_CENTER, "La pista de percusión no tiene mástil", FontId::proportional(13.0), theme::MUTED);
+        p.text(rect.center(), Align2::CENTER_CENTER, "The percussion track has no fretboard", FontId::proportional(13.0), theme::MUTED);
         return;
     }
     let strings = track.strings.len().clamp(1, 8);

@@ -74,7 +74,7 @@ impl Player {
         std::thread::spawn(move || {
             let result = std::fs::File::open(&path)
                 .map_err(|e| format!("{}: {e}", path.display()))
-                .and_then(|mut f| SoundFont::new(&mut f).map_err(|e| format!("SoundFont inválido: {e}")))
+                .and_then(|mut f| SoundFont::new(&mut f).map_err(|e| format!("Invalid SoundFont: {e}")))
                 .map(Arc::new);
             let _ = tx.send(result);
         });
@@ -95,10 +95,10 @@ impl Player {
     fn start_stream(&mut self, font: Arc<SoundFont>) -> Result<(), String> {
         self.font = Some(font.clone());
         let host = cpal::default_host();
-        let device = host.default_output_device().ok_or("no hay dispositivo de audio de salida")?;
-        let config = device.default_output_config().map_err(|e| format!("configuración de audio: {e}"))?;
+        let device = host.default_output_device().ok_or("no audio output device")?;
+        let config = device.default_output_config().map_err(|e| format!("audio configuration: {e}"))?;
         if config.sample_format() != cpal::SampleFormat::F32 {
-            return Err(format!("formato de audio no soportado: {:?}", config.sample_format()));
+            return Err(format!("unsupported audio format: {:?}", config.sample_format()));
         }
         let channels = config.channels() as usize;
         let sample_rate: u32 = config.sample_rate().into();
@@ -130,11 +130,11 @@ impl Player {
                         }
                     }
                 },
-                |e| eprintln!("error de audio: {e}"),
+                |e| eprintln!("audio error: {e}"),
                 None,
             )
-            .map_err(|e| format!("no se pudo abrir el audio: {e}"))?;
-        stream.play().map_err(|e| format!("no se pudo iniciar el audio: {e}"))?;
+            .map_err(|e| format!("could not open audio: {e}"))?;
+        stream.play().map_err(|e| format!("could not start audio: {e}"))?;
         self.stream = Some(stream);
         Ok(())
     }
@@ -268,10 +268,10 @@ impl Player {
     /// Renderiza la canción completa a un WAV (16 bits, estéreo, 44,1 kHz) en un hilo aparte.
     /// Respeta las pistas activas, sus ganancias, el metrónomo y el volumen actuales; siempre a velocidad 100 %.
     pub fn export_wav(&self, path: &Path) -> Result<Receiver<Result<(), String>>, String> {
-        let font = self.font.clone().ok_or("el SoundFont todavía no está cargado")?;
+        let font = self.font.clone().ok_or("the SoundFont is not loaded yet")?;
         let timeline = self.timeline.clone();
         if timeline.total <= 0.0 {
-            return Err("la canción no tiene contenido para exportar".into());
+            return Err("the song has nothing to export".into());
         }
         let mask = self.shared.mask.load(Ordering::Relaxed);
         let gains: Vec<u8> = self.shared.gains.iter().map(|g| g.load(Ordering::Relaxed)).collect();

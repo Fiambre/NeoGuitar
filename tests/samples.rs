@@ -196,7 +196,7 @@ fn ascii_export() {
     let text = neoguitar::ascii::ascii_tab(&song, &song.tracks[0], 100);
     println!("{}", text.lines().take(14).collect::<Vec<_>>().join("
 "));
-    assert!(text.contains("Afinación: E4 B3 G3 D3 A2 E2"));
+    assert!(text.contains("Tuning: E4 B3 G3 D3 A2 E2"));
     // 6 cuerdas por bloque, todas de igual largo.
     let rows: Vec<&str> = text.lines().filter(|l| l.contains('|') && l.contains('-')).collect();
     assert!(rows.len() >= 6);
@@ -255,4 +255,20 @@ fn sounding_notes_at_beat() {
     assert!(checked > 50, "se revisaron pocas notas: {checked}");
     // Fuera de rango no hay nada.
     assert!(s.tracks[0].sounding_notes(10_000, 0).is_empty());
+}
+
+#[test]
+fn key_signature_transposition() {
+    // Do mayor (0): +2 = Re (2#), -1 = Si (5#), +3 = Mib (3b); Sol mayor (1#) +1 = Lab (4b).
+    assert_eq!(transpose_key(0, 2), 2);
+    assert_eq!(transpose_key(0, -1), 5);
+    assert_eq!(transpose_key(0, 3), -3);
+    assert_eq!(transpose_key(1, 1), -4);
+    // Una octava no cambia nada, y volver atrás restituye la armadura.
+    for k in -5..=5i8 {
+        assert_eq!(transpose_key(k, 12), k);
+        for n in -12..=12 {
+            assert_eq!(transpose_key(transpose_key(k, n), -n), transpose_key(k, 0));
+        }
+    }
 }
