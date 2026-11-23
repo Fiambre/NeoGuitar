@@ -163,6 +163,8 @@ pub enum Icon {
     Dots,
     Headphones,
     Fretboard,
+    Split,
+    Fullscreen,
     Transpose,
     Sliders,
 }
@@ -295,6 +297,16 @@ pub fn draw_icon(p: &egui::Painter, icon: Icon, c: egui::Pos2, u: f32, fg: Color
         Icon::Sidebar => {
             p.rect_stroke(egui::Rect::from_min_max(pt(-2.0, -1.6), pt(2.0, 1.6)), radius(2), st, StrokeKind::Inside);
             p.rect_filled(egui::Rect::from_min_max(pt(-2.0, -1.6), pt(-0.7, 1.6)), radius(1), fg);
+        }
+        Icon::Split => {
+            p.rect_stroke(egui::Rect::from_min_max(pt(-2.0, -1.6), pt(2.0, 1.6)), radius(2), st, StrokeKind::Inside);
+            line(&[(0.0, -1.6), (0.0, 1.6)]);
+        }
+        Icon::Fullscreen => {
+            line(&[(-2.0, -0.8), (-2.0, -2.0), (-0.8, -2.0)]);
+            line(&[(0.8, -2.0), (2.0, -2.0), (2.0, -0.8)]);
+            line(&[(2.0, 0.8), (2.0, 2.0), (0.8, 2.0)]);
+            line(&[(-0.8, 2.0), (-2.0, 2.0), (-2.0, 0.8)]);
         }
         Icon::Metronome => {
             line(&[(-1.2, 1.8), (-0.6, -1.8), (0.6, -1.8), (1.2, 1.8), (-1.2, 1.8)]);

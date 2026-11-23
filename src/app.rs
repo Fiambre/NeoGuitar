@@ -46,6 +46,11 @@ pub struct App {
     jump_to: Option<usize>,
     /// Pista con el panel de mezcla desplegado.
     mixer_open: Option<usize>,
+    /// Vista dividida: dos pistas lado a lado (la izquierda es `track`, la derecha `split_track`).
+    split: bool,
+    split_track: usize,
+    /// Pantalla completa (sin barra superior ni panel lateral).
+    fullscreen: bool,
 }
 
 struct ScreenshotJob {
@@ -86,6 +91,9 @@ impl App {
             notice: None,
             jump_to: None,
             mixer_open: None,
+            split: false,
+            split_track: 1,
+            fullscreen: false,
         };
         // Se restauran los ajustes del reproductor.
         app.player.set_speed(app.settings.speed / 100.0);
@@ -110,6 +118,10 @@ impl App {
         }
         if std::env::var_os("NEOGUITAR_MULTI").is_some() {
             app.multi = true;
+        }
+        if let Some(t) = std::env::var("NEOGUITAR_SPLIT").ok().and_then(|v| v.parse::<usize>().ok()) {
+            app.split = true;
+            app.split_track = t.saturating_sub(1);
         }
         app.focus_measure = std::env::var("NEOGUITAR_MEASURE").ok().and_then(|v| v.parse().ok());
         // NEOGUITAR_PLAY_AT=segundos: arranca la reproducción en ese instante (para probar el cursor).
@@ -265,6 +277,22 @@ impl App {
     }
 
     /// Barra superior: abrir, pista y opciones de vista.
+    fn set_fullscreen(&mut self, ctx: &egui::Context, on: bool) {
+        self.fullscreen = on;
+        ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(on));
+    }
+
+    fn toggle_split(&mut self) {
+        self.split = !self.split;
+        if self.split {
+            // La pista de la derecha arranca distinta de la de la izquierda.
+            let n = self.song.as_ref().map(|s| s.tracks.len()).unwrap_or(0);
+            if n > 1 && (self.split_track == self.track || self.split_track >= n) {
+                self.split_track = (self.track + 1) % n;
+            }
+        }
+    }
+
     fn top_bar(&mut self, ui: &mut egui::Ui) {
         let labels: Vec<String> = self.song.as_ref().map(|s| s.tracks.iter().map(track_label).collect()).unwrap_or_default();
         ui.horizontal(|ui| {
@@ -352,6 +380,7 @@ impl App {
                 ui.add_space(6.0);
                 theme::chip(ui, Icon::Sidebar, self.show_side, "Panel").clicked().then(|| self.show_side = !self.show_side);
                 theme::chip(ui, Icon::Layers, self.multi, "Multi-track").on_hover_text("Show several tracks at once (pick which with the eye icon in the panel)").clicked().then(|| self.multi = !self.multi);
+                theme::chip(ui, Icon::Split, self.split, "Split").on_hover_text("Two tracks side by side").clicked().then(|| self.toggle_split());
                 theme::chip(ui, Icon::Fretboard, self.show_fretboard, "Fretboard").on_hover_text("Show the sounding notes on the fretboard").clicked().then(|| self.show_fretboard = !self.show_fretboard);
                 theme::chip(ui, Icon::Staff, self.show_staff, "Staff").clicked().then(|| self.show_staff = !self.show_staff);
             });
@@ -399,6 +428,11 @@ impl App {
                 self.toggle_play();
             }
             ui.add_space(8.0);
+            let fs_style = if self.fullscreen { IconStyle::FlatOn } else { IconStyle::Flat };
+            if theme::icon_button(ui, Icon::Fullscreen, 30.0, fs_style, true).on_hover_text("Full screen (F11, Esc to exit)").clicked() {
+                self.set_fullscreen(&ui.ctx().clone(), !self.fullscreen);
+            }
+            ui.add_space(4.0);
 
             let mut speed = self.player.speed * 100.0;
             ui.label(RichText::new("Speed").color(theme::MUTED));
@@ -556,6 +590,12 @@ impl eframe::App for App {
         if let Some(p) = dropped {
             self.open(&p);
         }
+        let (f11, esc) = ctx.input(|i| (i.key_pressed(egui::Key::F11), i.key_pressed(egui::Key::Escape)));
+        if f11 {
+            self.set_fullscreen(&ctx, !self.fullscreen);
+        } else if esc && self.fullscreen {
+            self.set_fullscreen(&ctx, false);
+        }
         let (space, ctrl_o, metro, home) = ctx.input(|i| {
             (
                 i.key_pressed(egui::Key::Space),
@@ -589,9 +629,11 @@ impl eframe::App for App {
             self.title = title;
         }
 
-        egui::Panel::top("toolbar").frame(theme::panel_frame(egui::Margin::symmetric(12, 8))).show_separator_line(true).show(ui, |ui| {
-            self.top_bar(ui);
-        });
+        if !self.fullscreen {
+            egui::Panel::top("toolbar").frame(theme::panel_frame(egui::Margin::symmetric(12, 8))).show_separator_line(true).show(ui, |ui| {
+                self.top_bar(ui);
+            });
+        }
         if self.song.is_some() {
             egui::Panel::bottom("transport").frame(theme::panel_frame(egui::Margin::symmetric(14, 8))).show_separator_line(true).show(ui, |ui| {
                 self.transport(ui);
@@ -611,7 +653,7 @@ impl eframe::App for App {
             }
         }
         if let Some(song) = &self.song {
-            if self.show_side {
+            if self.show_side && !self.fullscreen {
                 egui::Panel::left("info").default_size(300.0).size_range(240.0..=460.0).frame(theme::panel_frame(egui::Margin::same(12))).show(ui, |ui| {
                     egui::ScrollArea::vertical().show(ui, |ui| {
                         side_info(ui, song, self.path.as_deref(), &mut self.track, &self.player, &mut self.visible, self.multi, &mut self.jump_to, &mut self.mixer_open)
@@ -642,6 +684,31 @@ impl eframe::App for App {
         let mut pick_request = false;
         egui::CentralPanel::default().frame(egui::Frame::new().fill(theme::SCORE_BG).inner_margin(egui::Margin::symmetric(10, 6))).show(ui, |ui| match &self.song {
             Some(song) => match song.tracks.get(self.track) {
+                Some(_) if self.split && song.tracks.len() >= 2 => {
+                    // Vista dividida: dos pistas lado a lado, cada una con su selector y su desplazamiento.
+                    let labels: Vec<String> = song.tracks.iter().map(track_label).collect();
+                    let last = song.tracks.len() - 1;
+                    let mut sel = [self.track.min(last), self.split_track.min(last)];
+                    ui.columns(2, |cols| {
+                        for (k, col) in cols.iter_mut().enumerate() {
+                            egui::ComboBox::from_id_salt(("split_track", k)).width(col.available_width().min(280.0)).selected_text(labels[sel[k]].clone()).show_ui(col, |ui| {
+                                for (i, l) in labels.iter().enumerate() {
+                                    ui.selectable_value(&mut sel[k], i, l);
+                                }
+                            });
+                            col.add_space(2.0);
+                            let track = &song.tracks[sel[k]];
+                            let a = col.push_id(("split_view", k), |ui| {
+                                tab_view::show(ui, song, &[track], self.zoom, scroll_to, playhead, self.player.loop_measures, self.show_staff, self.player.transpose)
+                            });
+                            if a.inner.is_some() {
+                                action = a.inner;
+                            }
+                        }
+                    });
+                    self.track = sel[0];
+                    self.split_track = sel[1];
+                }
                 Some(selected) => {
                     // Vista multipista: las pistas marcadas con el ojo; si no hay ninguna, la seleccionada.
                     let mut list: Vec<&neoguitar::model::Track> = Vec::new();

@@ -15,6 +15,7 @@ A **Guitar Pro** tab reader, viewer and player written in Rust, with a UI built 
 - **Virtual fretboard:** shows the sounding notes on the guitar neck.
 - **Sections:** jump to Intro, Verse, Chorus… from the markers stored in the file.
 - **Multi-track view:** several tracks stacked in the same system.
+- **Split view:** two tracks side by side (e.g. guitar and bass), each with its own selector. **Full screen** (F11) hides the toolbar and side panel.
 - **Export:** audio (WAV), MIDI and plain-text tab.
 - Persistent settings (zoom, speed, recent files, SoundFont…).
 
@@ -44,6 +45,7 @@ The repository includes [GeneralUser GS](https://schristiancollins.com/generalus
 |---|---|
 | `Space` | Play / pause |
 | `Home` | Stop and go back to the start |
+| `F11` / `Esc` | Enter / leave full screen |
 | `M` | Metronome |
 | `Ctrl+O` | Open a file |
 | Right-click a measure | Set the loop |
