@@ -432,3 +432,25 @@ fn live_mix_changes_pan_and_instrument() {
     println!("diferencia de audio entre instrumentos: {diff:.1}");
     assert!(diff > 5.0, "cambiar el instrumento debe cambiar el sonido");
 }
+
+#[test]
+fn technique_channels_and_strum() {
+    let song = load("extra/Harmonics.gp5");
+    let tl = Timeline::build(&song);
+    assert!(!tl.tech.is_empty(), "harmonics should get an auxiliary channel");
+    for &(track, ch, prog) in &tl.tech {
+        assert_eq!(prog, 31);
+        assert!(!tl.channels.contains(&ch) && ch != 9, "auxiliary channel must be free");
+        assert!(tl.setup.iter().any(|&(c, cmd, d1, _)| c == ch && cmd == 0xC0 && d1 == 31));
+        assert!(tl.events.iter().any(|e| e.channel == ch && e.track as usize == track && matches!(e.kind, Kind::NoteOn { .. })));
+    }
+    // The transposed copy keeps the auxiliary channels (the mixer needs them).
+    assert_eq!(tl.transposed(2).tech, tl.tech);
+
+    // Chords are strummed: notes of the same chord do not all start at the same instant.
+    let song = load("extra/Chords.gp5");
+    let tl = Timeline::build(&song);
+    let mut starts: Vec<f64> = tl.events.iter().filter(|e| e.channel != 9 && matches!(e.kind, Kind::NoteOn { .. })).map(|e| e.time).collect();
+    starts.dedup_by(|a, b| (*a - *b).abs() < 1e-9);
+    assert!(starts.windows(2).any(|w| w[1] - w[0] > 0.0 && w[1] - w[0] < 0.05), "expected staggered chord notes");
+}

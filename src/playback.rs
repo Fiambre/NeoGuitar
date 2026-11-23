@@ -75,6 +75,30 @@ pub struct Timeline {
     pub total: f64,
     /// Canal MIDI principal de cada pista.
     pub channels: Vec<u8>,
+    /// Canales auxiliares por técnica: (pista, canal, programa), p. ej. guitarra apagada o armónicos.
+    pub tech: Vec<(usize, u8, u8)>,
+}
+
+/// Programa General MIDI que mejor representa una técnica en una guitarra (programas 24..=30).
+/// `None` si la nota se toca con el instrumento normal de la pista.
+fn technique_program(base: u8, e: &Effects) -> Option<u8> {
+    if !(24..=30).contains(&base) {
+        return None;
+    }
+    if e.harmonic.is_some() {
+        return Some(31); // Guitar Harmonics
+    }
+    // El sonido apagado solo queda bien con guitarras limpias; con distorsión suena delgado.
+    if (e.palm_mute || e.dead) && base < 28 {
+        return Some(28); // Muted Guitar
+    }
+    None
+}
+
+/// Variación determinista (-range..=range) para humanizar la velocidad.
+fn jitter(seed: f64, key: i32, range: i32) -> i32 {
+    let h = ((seed * 1000.0) as i64).wrapping_mul(73856093) ^ (key as i64).wrapping_mul(19349663);
+    (h.rem_euclid(2 * range as i64 + 1)) as i32 - range
 }
 
 /// Orden de reproducción de los compases con repeticiones y finales alternativos.
@@ -254,7 +278,42 @@ impl Timeline {
             }
         }
         let used = song.tracks.iter().filter(|t| !t.is_percussion).count().min(melodic.len());
-        let mut pool = ChannelPool { free_at: melodic.iter().skip(used).map(|&c| (c, 0.0)).collect() };
+        // Canales fijos por técnica (guitarra apagada, armónicos): se reservan solo si la pista los usa
+        // y siempre quedan al menos 4 canales libres para las notas con modulación de altura.
+        let mut tech_chan: HashMap<(usize, u8), u8> = HashMap::new();
+        let mut reserved = used;
+        for (ti, t) in song.tracks.iter().enumerate() {
+            if t.is_percussion {
+                continue;
+            }
+            let base = t.program.clamp(0, 127) as u8;
+            let mut need: Vec<u8> = Vec::new();
+            for m in &t.measures {
+                for b in &m.beats {
+                    for v in &b.voices {
+                        for n in &v.notes {
+                            if let Some(p) = technique_program(base, &n.effect) {
+                                if !need.contains(&p) {
+                                    need.push(p);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            for p in need {
+                if melodic.len() > reserved + 4 {
+                    let ch = melodic[reserved];
+                    reserved += 1;
+                    tech_chan.insert((ti, p), ch);
+                    tl.tech.push((ti, ch, p));
+                    tl.setup.push((ch, 0xC0, p, 0));
+                    tl.setup.push((ch, 0xB0, 7, t.volume.min(127)));
+                    tl.setup.push((ch, 0xB0, 10, t.pan.min(127)));
+                }
+            }
+        }
+        let mut pool = ChannelPool { free_at: melodic.iter().skip(reserved).map(|&c| (c, 0.0)).collect() };
 
         // ---------------------------------------------------------------- 1.ª pasada
         let mut specs: Vec<Spec> = Vec::new();
@@ -319,6 +378,7 @@ impl Timeline {
                         let dur = tm.secs(start_tick + dur_ticks) - start;
                         let spt = tm.spt_at(start_tick);
 
+                        let strummed = !track.is_percussion && (24..=31).contains(&track.program) && voice.notes.len() >= 3;
                         for note in &voice.notes {
                             let open_key = if track.is_percussion {
                                 0
@@ -341,6 +401,10 @@ impl Timeline {
                             }
                             let e = &note.effect;
                             let mut velocity = velocity_of(note.velocity);
+                            if !track.is_percussion {
+                                // Pequeña variación determinista para que no suene mecánico.
+                                velocity += jitter(start, key, 3);
+                            }
                             let mut length = dur;
                             if e.ghost {
                                 velocity = velocity * 6 / 10;
@@ -387,7 +451,14 @@ impl Timeline {
                                     }
                                 }
                             }
-                            let mut start_note = start;
+                            // Rasgueo: en acordes de guitarra las cuerdas entran escalonadas, de grave a aguda.
+                            let strum = if strummed {
+                                let rank = voice.notes.iter().filter(|n| n.string > note.string).count();
+                                (rank as f64 * 0.011).min(0.045).min(dur * 0.4)
+                            } else {
+                                0.0
+                            };
+                            let mut start_note = start + strum;
                             // Notas de adorno.
                             if let (Some(g), false) = (e.grace, track.is_percussion) {
                                 let gdur = (g.ticks as f64 * spt).clamp(0.02, 0.25);
@@ -419,11 +490,21 @@ impl Timeline {
                                     });
                                 }
                             }
+                            // Instrumento según la técnica (guitarra apagada, armónicos).
+                            let base_program = track.program.clamp(0, 127) as u8;
+                            let (note_channel, note_program) = if track.is_percussion {
+                                (channels[ti], base_program)
+                            } else {
+                                match technique_program(base_program, e).and_then(|p| tech_chan.get(&(ti, p)).map(|&c| (c, p))) {
+                                    Some(x) => x,
+                                    None => (channels[ti], base_program),
+                                }
+                            };
                             specs.push(Spec {
                                 track: ti,
                                 string: note.string,
-                                channel: channels[ti],
-                                program: track.program.clamp(0, 127) as u8,
+                                channel: note_channel,
+                                program: note_program,
                                 volume: track.volume,
                                 pan: track.pan,
                                 percussion: track.is_percussion,
@@ -513,7 +594,7 @@ impl Timeline {
                 e
             })
             .collect();
-        Timeline { events, segs: self.segs.clone(), setup: self.setup.clone(), total: self.total, channels: self.channels.clone() }
+        Timeline { events, segs: self.segs.clone(), setup: self.setup.clone(), total: self.total, channels: self.channels.clone(), tech: self.tech.clone() }
     }
 
     pub fn position(&self, t: f64) -> Option<(usize, u64)> {
@@ -911,10 +992,15 @@ impl Engine {
                 continue;
             }
             let ch = self.timeline.channels[t];
+            // Canales auxiliares de técnica de esta pista: (canal, programa del archivo).
+            let tech: Vec<(u8, u8)> = self.timeline.tech.iter().filter(|x| x.0 == t).map(|x| (x.1, x.2)).collect();
             if cur[0] != self.applied[t][0] {
                 let v = if cur[0] != MIX_FILE { Some(cur[0]) } else { self.file_value(ch, 0xB0, 10) };
                 if let Some(v) = v {
                     self.synth.process_midi_message(ch as i32, 0xB0, 10, v as i32);
+                    for &(tc, _) in &tech {
+                        self.synth.process_midi_message(tc as i32, 0xB0, 10, v as i32);
+                    }
                 }
             }
             if cur[1] != self.applied[t][1] && ch != 9 {
@@ -922,10 +1008,17 @@ impl Engine {
                 if let Some(v) = v {
                     self.synth.process_midi_message(ch as i32, 0xC0, v as i32, 0);
                 }
+                for &(tc, tp) in &tech {
+                    let p = if cur[1] != MIX_FILE { cur[1] } else { tp };
+                    self.synth.process_midi_message(tc as i32, 0xC0, p as i32, 0);
+                }
             }
             if cur[2] != self.applied[t][2] {
                 let v = if cur[2] != MIX_FILE { cur[2] } else { DEFAULT_REVERB };
                 self.synth.process_midi_message(ch as i32, 0xB0, 91, v as i32);
+                for &(tc, _) in &tech {
+                    self.synth.process_midi_message(tc as i32, 0xB0, 91, v as i32);
+                }
             }
             self.applied[t] = cur;
         }
