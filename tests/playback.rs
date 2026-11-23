@@ -499,3 +499,26 @@ fn amp_synth_and_tremolo_bar() {
     }
     assert!(found, "no sample with a tremolo bar");
 }
+
+/// Optional: set NEOGUITAR_TEST_SF2 to a SoundFont with quirks (e.g. Timbres of Heaven) to check it loads and sounds.
+#[test]
+fn loads_quirky_soundfont() {
+    let Ok(path) = std::env::var("NEOGUITAR_TEST_SF2") else { return };
+    let mut file = std::fs::File::open(&path).unwrap();
+    let font = Arc::new(SoundFont::new(&mut file).expect("SoundFont should load"));
+    let song = load("extra/Chords.gp5");
+    let tl = Arc::new(Timeline::build(&song));
+    let (tx, rx) = channel();
+    let shared = Arc::new(Shared::default());
+    shared.mask.store(u64::MAX, Ordering::Relaxed);
+    let mut engine = Engine::new(font, 44100, shared, rx).unwrap();
+    tx.send(Cmd::SetTimeline(tl)).unwrap();
+    tx.send(Cmd::Play).unwrap();
+    let (mut l, mut r) = (vec![0f32; 512], vec![0f32; 512]);
+    let mut peak = 0f32;
+    for _ in 0..(44100 * 5 / 512) {
+        engine.render(&mut l, &mut r);
+        peak = l.iter().chain(r.iter()).fold(peak, |p, x| p.max(x.abs()));
+    }
+    assert!(peak > 0.02, "silent: {peak}");
+}
