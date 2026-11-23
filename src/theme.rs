@@ -165,6 +165,7 @@ pub enum Icon {
     Fretboard,
     Split,
     Fullscreen,
+    Lyrics,
     Transpose,
     Sliders,
 }
@@ -301,6 +302,12 @@ pub fn draw_icon(p: &egui::Painter, icon: Icon, c: egui::Pos2, u: f32, fg: Color
         Icon::Split => {
             p.rect_stroke(egui::Rect::from_min_max(pt(-2.0, -1.6), pt(2.0, 1.6)), radius(2), st, StrokeKind::Inside);
             line(&[(0.0, -1.6), (0.0, 1.6)]);
+        }
+        Icon::Lyrics => {
+            p.rect_stroke(egui::Rect::from_min_max(pt(-2.0, -1.8), pt(2.0, 0.8)), radius(2), st, StrokeKind::Inside);
+            line(&[(-0.9, 0.8), (-1.3, 1.9), (0.2, 0.8)]);
+            line(&[(-1.2, -0.8), (1.2, -0.8)]);
+            line(&[(-1.2, 0.0), (0.4, 0.0)]);
         }
         Icon::Fullscreen => {
             line(&[(-2.0, -0.8), (-2.0, -2.0), (-0.8, -2.0)]);

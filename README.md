@@ -14,6 +14,7 @@ A **Guitar Pro** tab reader, viewer and player written in Rust, with a UI built 
 - **Track mixer:** instrument (all 128 General MIDI sounds), pan and reverb per track, applied live.
 - **Virtual fretboard:** shows the sounding notes on the guitar neck.
 - **Sections:** jump to Intro, Verse, Chorus… from the markers stored in the file.
+- **Lyrics:** search [LRCLIB](https://lrclib.net) (only when you press the button: it sends the title and artist) or load an `.lrc` / `.txt` file. The current line is highlighted and follows the playback; the lyric times are stretched over the tab and you can pin any line to the playback position (right-click) to resync it. Shown in a side panel, or as a strip under the score in split view.
 - **Multi-track view:** several tracks stacked in the same system.
 - **Split view:** two tracks side by side (e.g. guitar and bass), each with its own selector. **Full screen** (F11) hides the toolbar and side panel.
 - **Export:** audio (WAV), MIDI and plain-text tab.

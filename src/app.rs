@@ -2,6 +2,7 @@ use crate::theme::{self, Icon, IconStyle};
 use crate::tab_view::{self, ViewAction};
 use eframe::egui::{self, Align, Layout, RichText};
 use neoguitar::audio::{Player, Status};
+use neoguitar::lyrics::{self, Lyrics};
 use neoguitar::model::{midi_note_name, Song};
 use neoguitar::settings::Settings;
 use std::path::{Path, PathBuf};
@@ -51,6 +52,21 @@ pub struct App {
     split_track: usize,
     /// Pantalla completa (sin barra superior ni panel lateral).
     fullscreen: bool,
+    /// Letra externa (LRCLIB o archivo) con la que se sigue la reproducción.
+    show_lyrics: bool,
+    lyrics: Option<LyricsState>,
+    lyr_artist: String,
+    lyr_title: String,
+    lyr_job: Option<std::sync::mpsc::Receiver<Result<Option<Lyrics>, String>>>,
+    lyr_msg: Option<String>,
+    /// Última línea resaltada (para desplazar la lista solo cuando cambia).
+    lyr_last: Option<usize>,
+}
+
+/// Letra cargada y sus puntos de sincronización: (tiempo de la letra, tiempo de la tablatura).
+struct LyricsState {
+    data: Lyrics,
+    anchors: Vec<(f64, f64)>,
 }
 
 struct ScreenshotJob {
@@ -94,6 +110,13 @@ impl App {
             split: false,
             split_track: 1,
             fullscreen: false,
+            show_lyrics: false,
+            lyrics: None,
+            lyr_artist: String::new(),
+            lyr_title: String::new(),
+            lyr_job: None,
+            lyr_msg: None,
+            lyr_last: None,
         };
         // Se restauran los ajustes del reproductor.
         app.player.set_speed(app.settings.speed / 100.0);
@@ -119,6 +142,12 @@ impl App {
         if std::env::var_os("NEOGUITAR_MULTI").is_some() {
             app.multi = true;
         }
+        if let Some(p) = std::env::var_os("NEOGUITAR_LYRICS") {
+            if let Ok(text) = std::fs::read_to_string(&p) {
+                app.lyrics = Some(LyricsState { data: lyrics::from_text(&text, "test file".into()), anchors: Vec::new() });
+                app.show_lyrics = true;
+            }
+        }
         if let Some(t) = std::env::var("NEOGUITAR_SPLIT").ok().and_then(|v| v.parse::<usize>().ok()) {
             app.split = true;
             app.split_track = t.saturating_sub(1);
@@ -139,6 +168,16 @@ impl App {
                 self.player.set_song(&song);
                 // Por defecto, en la vista multipista se muestran las primeras pistas.
                 self.visible = (0..song.tracks.len()).map(|i| i < 3).collect();
+                self.lyr_artist = song.artist.trim().to_string();
+                self.lyr_title = song.title.trim().to_string();
+                self.lyrics = None;
+                self.lyr_msg = None;
+                self.lyr_last = None;
+                if let (Some(dir), false) = (lyrics_dir(), self.lyr_title.is_empty()) {
+                    if let Some(l) = lyrics::cache_load(&dir, &self.lyr_artist, &self.lyr_title) {
+                        self.lyrics = Some(LyricsState { data: l, anchors: Vec::new() });
+                    }
+                }
                 self.song = Some(song);
                 self.path = Some(path.to_path_buf());
                 self.settings.add_recent(path);
@@ -277,6 +316,214 @@ impl App {
     }
 
     /// Barra superior: abrir, pista y opciones de vista.
+    /// Recoge el resultado de la búsqueda de letra en curso.
+    fn poll_lyrics(&mut self, ctx: &egui::Context) {
+        let Some(rx) = &self.lyr_job else { return };
+        match rx.try_recv() {
+            Ok(result) => {
+                self.lyr_job = None;
+                match result {
+                    Ok(Some(l)) => {
+                        if let Some(dir) = lyrics_dir() {
+                            lyrics::cache_store(&dir, &self.lyr_artist, &self.lyr_title, &l);
+                        }
+                        self.lyr_msg = None;
+                        self.lyr_last = None;
+                        self.lyrics = Some(LyricsState { data: l, anchors: Vec::new() });
+                    }
+                    Ok(None) => self.lyr_msg = Some("No lyrics found. Check the title and artist.".into()),
+                    Err(e) => self.lyr_msg = Some(e),
+                }
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => ctx.request_repaint_after(Duration::from_millis(200)),
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => self.lyr_job = None,
+        }
+    }
+
+    fn search_lyrics(&mut self, ctx: &egui::Context) {
+        if self.lyr_job.is_some() {
+            return;
+        }
+        let (artist, title, secs) = (self.lyr_artist.clone(), self.lyr_title.clone(), self.player.timeline.total);
+        let (tx, rx) = std::sync::mpsc::channel();
+        let ctx = ctx.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send(lyrics::fetch(&artist, &title, secs));
+            ctx.request_repaint();
+        });
+        self.lyr_job = Some(rx);
+        self.lyr_msg = Some("Searching…".into());
+    }
+
+    fn load_lyrics_file(&mut self) {
+        let Some(path) = rfd::FileDialog::new().add_filter("Lyrics", &["lrc", "txt"]).pick_file() else { return };
+        match std::fs::read_to_string(&path) {
+            Ok(text) => {
+                let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                self.lyrics = Some(LyricsState { data: lyrics::from_text(&text, name), anchors: Vec::new() });
+                self.lyr_msg = None;
+                self.lyr_last = None;
+            }
+            Err(e) => self.lyr_msg = Some(format!("Could not read the file: {e}")),
+        }
+    }
+
+    /// Búsqueda y carga de letra, o su estado y los botones de sincronización si ya hay una.
+    fn lyrics_controls(&mut self, ui: &mut egui::Ui, compact: bool) {
+        if self.lyrics.is_none() {
+            let ctx = ui.ctx().clone();
+            let row = |ui: &mut egui::Ui, this: &mut App| {
+                ui.label(RichText::new("Artist").color(theme::MUTED));
+                ui.add(egui::TextEdit::singleline(&mut this.lyr_artist).desired_width(if compact { 150.0 } else { ui.available_width() }));
+                ui.label(RichText::new("Title").color(theme::MUTED));
+                ui.add(egui::TextEdit::singleline(&mut this.lyr_title).desired_width(if compact { 180.0 } else { ui.available_width() }));
+            };
+            if compact {
+                ui.horizontal_wrapped(|ui| row(ui, self));
+            } else {
+                ui.vertical(|ui| row(ui, self));
+            }
+            ui.horizontal(|ui| {
+                let can = self.lyr_job.is_none() && !self.lyr_title.trim().is_empty();
+                if ui.add_enabled(can, egui::Button::new("Search LRCLIB")).on_hover_text("Sends the title and artist to lrclib.net").clicked() {
+                    self.search_lyrics(&ctx);
+                }
+                if ui.button("Load file…").on_hover_text(".lrc (with times) or .txt").clicked() {
+                    self.load_lyrics_file();
+                }
+            });
+        } else if let Some(state) = &mut self.lyrics {
+            ui.label(RichText::new(&state.data.source).size(11.0).color(theme::MUTED));
+            let mut remove = false;
+            ui.horizontal(|ui| {
+                if ui.add_enabled(!state.anchors.is_empty(), egui::Button::new("Reset sync")).on_hover_text("Forget the sync points").clicked() {
+                    state.anchors.clear();
+                }
+                if ui.button("Remove").on_hover_text("Search or load another lyric").clicked() {
+                    remove = true;
+                }
+            });
+            if remove {
+                self.lyrics = None;
+                self.lyr_last = None;
+            }
+        }
+        if let Some(m) = &self.lyr_msg {
+            ui.label(RichText::new(m).size(12.0).color(theme::MUTED));
+        }
+    }
+
+    /// Panel lateral con la letra completa: la línea que suena se resalta y la lista se desplaza sola.
+    fn lyrics_panel(&mut self, ui: &mut egui::Ui) {
+        theme::section(ui, "Lyrics");
+        self.lyrics_controls(ui, false);
+        let Some(state) = &self.lyrics else { return };
+        ui.add_space(6.0);
+        let total = self.player.timeline.total;
+        let times = lyrics::tab_times(&state.data, &state.anchors, total);
+        let pos = self.player.position();
+        let cur = if self.player.is_playing() || pos > 0.0 { lyrics::current(&state.data, &times, pos) } else { None };
+        let changed = cur != self.lyr_last;
+        let (mut seek, mut pin, mut unpin) = (None, None, None);
+        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+            for (i, line) in state.data.lines.iter().enumerate() {
+                if line.text.is_empty() {
+                    ui.add_space(8.0);
+                    continue;
+                }
+                let is_cur = cur == Some(i);
+                let pinned = state.anchors.iter().any(|a| (a.0 - line.time).abs() < 1e-6);
+                let label = format!("{}{}", if pinned { "● " } else { "" }, line.text);
+                let text = if is_cur { RichText::new(label).size(17.0).strong().color(theme::ACCENT) } else { RichText::new(label).size(14.0).color(theme::MUTED) };
+                let resp = ui.add(egui::Label::new(text).sense(egui::Sense::click()));
+                if is_cur && changed {
+                    ui.scroll_to_rect(resp.rect, Some(Align::Center));
+                }
+                if resp.clicked() {
+                    seek = Some(times[i]);
+                }
+                resp.context_menu(|ui| {
+                    if ui.button("Starts at the current position").on_hover_text("Pins this line to the playback position").clicked() {
+                        pin = Some(i);
+                        ui.close();
+                    }
+                    if pinned && ui.button("Remove sync point").clicked() {
+                        unpin = Some(i);
+                        ui.close();
+                    }
+                });
+            }
+        });
+        self.lyr_last = cur;
+        self.apply_lyric_actions(seek, pin, unpin);
+    }
+
+    /// Franja bajo la partitura (vista dividida): línea actual y siguiente, y ajuste rápido.
+    fn lyrics_strip(&mut self, ui: &mut egui::Ui) {
+        if self.lyrics.is_none() {
+            self.lyrics_controls(ui, true);
+            return;
+        }
+        let Some(state) = &self.lyrics else { return };
+        let total = self.player.timeline.total;
+        let times = lyrics::tab_times(&state.data, &state.anchors, total);
+        let pos = self.player.position();
+        let cur = if self.player.is_playing() || pos > 0.0 { lyrics::current(&state.data, &times, pos) } else { None };
+        let next = cur.and_then(|c| lyrics::next_line(&state.data, c));
+        let cur_text = cur.map(|c| state.data.lines[c].text.clone()).unwrap_or_default();
+        let next_text = next.map(|n| state.data.lines[n].text.clone()).unwrap_or_default();
+        let mut pin = None;
+        let mut reset = false;
+        let mut remove = false;
+        ui.horizontal(|ui| {
+            ui.vertical(|ui| {
+                ui.set_min_width(ui.available_width() - 220.0);
+                ui.label(RichText::new(if cur_text.is_empty() { "…" } else { &cur_text }).size(21.0).strong().color(theme::ACCENT));
+                ui.label(RichText::new(if next_text.is_empty() { " " } else { &next_text }).size(15.0).color(theme::MUTED));
+            });
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if ui.button("Remove").clicked() {
+                    remove = true;
+                }
+                if ui.add_enabled(!state.anchors.is_empty(), egui::Button::new("Reset sync")).clicked() {
+                    reset = true;
+                }
+                if ui.add_enabled(next.is_some(), egui::Button::new("Next line starts now")).on_hover_text("Pins the next line to the playback position").clicked() {
+                    pin = next;
+                }
+            });
+        });
+        self.apply_lyric_actions(None, pin, None);
+        if reset {
+            if let Some(s) = &mut self.lyrics {
+                s.anchors.clear();
+            }
+        }
+        if remove {
+            self.lyrics = None;
+            self.lyr_last = None;
+        }
+    }
+
+    fn apply_lyric_actions(&mut self, seek: Option<f64>, pin: Option<usize>, unpin: Option<usize>) {
+        if let Some(t) = seek {
+            self.player.seek(t.max(0.0));
+            self.last_followed = None;
+        }
+        let pos = self.player.position();
+        if let Some(state) = &mut self.lyrics {
+            if let Some(i) = pin {
+                let t = state.data.lines[i].time;
+                state.anchors.retain(|a| (a.0 - t).abs() > 1e-6);
+                state.anchors.push((t, pos));
+            }
+            if let Some(i) = unpin {
+                let t = state.data.lines[i].time;
+                state.anchors.retain(|a| (a.0 - t).abs() > 1e-6);
+            }
+        }
+    }
+
     fn set_fullscreen(&mut self, ctx: &egui::Context, on: bool) {
         self.fullscreen = on;
         ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(on));
@@ -381,6 +628,7 @@ impl App {
                 theme::chip(ui, Icon::Sidebar, self.show_side, "Panel").clicked().then(|| self.show_side = !self.show_side);
                 theme::chip(ui, Icon::Layers, self.multi, "Multi-track").on_hover_text("Show several tracks at once (pick which with the eye icon in the panel)").clicked().then(|| self.multi = !self.multi);
                 theme::chip(ui, Icon::Split, self.split, "Split").on_hover_text("Two tracks side by side").clicked().then(|| self.toggle_split());
+                theme::chip(ui, Icon::Lyrics, self.show_lyrics, "Lyrics").on_hover_text("Lyrics next to the score (search LRCLIB or load a file)").clicked().then(|| self.show_lyrics = !self.show_lyrics);
                 theme::chip(ui, Icon::Fretboard, self.show_fretboard, "Fretboard").on_hover_text("Show the sounding notes on the fretboard").clicked().then(|| self.show_fretboard = !self.show_fretboard);
                 theme::chip(ui, Icon::Staff, self.show_staff, "Staff").clicked().then(|| self.show_staff = !self.show_staff);
             });
@@ -568,6 +816,7 @@ impl eframe::App for App {
                 }
             }
         }
+        self.poll_lyrics(&ctx);
         self.player.sync_speed();
         self.persist_settings();
         if matches!(self.player.status, Status::Loading(_)) {
@@ -604,17 +853,18 @@ impl eframe::App for App {
                 i.key_pressed(egui::Key::Home),
             )
         });
-        if space {
+        let typing = ctx.egui_wants_keyboard_input();
+        if space && !typing {
             self.toggle_play();
         }
         if ctrl_o {
             self.pick_file();
         }
-        if metro {
+        if metro && !typing {
             let on = !self.player.metronome();
             self.player.set_metronome(on);
         }
-        if home {
+        if home && !typing {
             self.player.stop();
             self.last_followed = None;
         }
@@ -658,6 +908,18 @@ impl eframe::App for App {
                     egui::ScrollArea::vertical().show(ui, |ui| {
                         side_info(ui, song, self.path.as_deref(), &mut self.track, &self.player, &mut self.visible, self.multi, &mut self.jump_to, &mut self.mixer_open)
                     });
+                });
+            }
+        }
+
+        if self.show_lyrics && self.song.is_some() {
+            if self.split {
+                egui::Panel::bottom("lyrics_strip").frame(theme::panel_frame(egui::Margin::symmetric(14, 8))).show_separator_line(true).show(ui, |ui| {
+                    self.lyrics_strip(ui);
+                });
+            } else {
+                egui::Panel::right("lyrics").default_size(300.0).size_range(220.0..=480.0).frame(theme::panel_frame(egui::Margin::same(12))).show(ui, |ui| {
+                    self.lyrics_panel(ui);
                 });
             }
         }
@@ -777,6 +1039,11 @@ impl eframe::App for App {
             None => {}
         }
     }
+}
+
+/// Carpeta donde se guardan las letras ya descargadas.
+fn lyrics_dir() -> Option<PathBuf> {
+    Settings::path().and_then(|p| p.parent().map(|d| d.join("lyrics")))
 }
 
 fn track_label(t: &neoguitar::model::Track) -> String {

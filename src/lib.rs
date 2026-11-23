@@ -4,6 +4,7 @@ pub mod ascii;
 pub mod audio;
 pub mod model;
 pub mod gm;
+pub mod lyrics;
 pub mod playback;
 pub mod settings;
 
