@@ -5,6 +5,7 @@ use neoguitar::audio::{Player, Status};
 use neoguitar::lyrics::{self, Lyrics};
 use neoguitar::model::{midi_note_name, Song};
 use neoguitar::settings::Settings;
+use neoguitar::update::{self, Release};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -61,6 +62,12 @@ pub struct App {
     lyr_msg: Option<String>,
     /// Última línea resaltada (para desplazar la lista solo cuando cambia).
     lyr_last: Option<usize>,
+    /// Versión nueva disponible, consulta en curso, descarga en curso y último aviso.
+    update: Option<Release>,
+    update_check: Option<std::sync::mpsc::Receiver<Result<Option<Release>, String>>>,
+    update_manual: bool,
+    update_dl: Option<std::sync::mpsc::Receiver<Result<PathBuf, String>>>,
+    update_msg: Option<String>,
 }
 
 /// Letra cargada y sus puntos de sincronización: (tiempo de la letra, tiempo de la tablatura).
@@ -117,7 +124,16 @@ impl App {
             lyr_job: None,
             lyr_msg: None,
             lyr_last: None,
+            update: None,
+            update_check: None,
+            update_manual: false,
+            update_dl: None,
+            update_msg: None,
         };
+        // Consulta de versión nueva: una vez al día como máximo y nunca en las corridas de captura.
+        if (persist || std::env::var_os("NEOGUITAR_CURRENT_VERSION").is_some()) && app.settings.check_updates && unix_now().saturating_sub(app.settings.last_update_check) >= 86_400 {
+            app.start_update_check(&cc.egui_ctx, false);
+        }
         // Se restauran los ajustes del reproductor.
         app.player.set_speed(app.settings.speed / 100.0);
         app.player.set_volume(app.settings.volume);
@@ -316,6 +332,116 @@ impl App {
     }
 
     /// Barra superior: abrir, pista y opciones de vista.
+    fn start_update_check(&mut self, ctx: &egui::Context, manual: bool) {
+        if self.update_check.is_some() {
+            return;
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        let ctx = ctx.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send(update::check());
+            ctx.request_repaint();
+        });
+        self.update_check = Some(rx);
+        self.update_manual = manual;
+        if manual {
+            self.notice = Some("Checking for updates…".into());
+        }
+    }
+
+    fn start_update_download(&mut self, ctx: &egui::Context, release: &Release) {
+        let Some(installer) = release.installer.clone() else { return };
+        if self.update_dl.is_some() {
+            return;
+        }
+        let dest = update::installer_path(&release.version);
+        let (tx, rx) = std::sync::mpsc::channel();
+        let ctx = ctx.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send(update::download(&installer, &dest).map(|_| dest));
+            ctx.request_repaint();
+        });
+        self.update_dl = Some(rx);
+        self.update_msg = Some(format!("Downloading {} ({} MB)…", release.version, (release.installer.as_ref().map(|i| i.size).unwrap_or(0) / 1_000_000).max(1)));
+    }
+
+    /// Recoge los resultados de la consulta y de la descarga de actualizaciones.
+    fn poll_updates(&mut self, ctx: &egui::Context) {
+        if let Some(rx) = &self.update_check {
+            match rx.try_recv() {
+                Ok(result) => {
+                    self.update_check = None;
+                    match result {
+                        Ok(found) => {
+                            self.settings.last_update_check = unix_now();
+                            if found.is_none() && self.update_manual {
+                                self.notice = Some(format!("You have the latest version ({})", env!("CARGO_PKG_VERSION")));
+                            } else if self.update_manual {
+                                self.notice = None;
+                            }
+                            self.update = found;
+                        }
+                        Err(e) => {
+                            if self.update_manual {
+                                self.notice = None;
+                                self.error = Some(e);
+                            }
+                        }
+                    }
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => ctx.request_repaint_after(Duration::from_millis(300)),
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => self.update_check = None,
+            }
+        }
+        if let Some(rx) = &self.update_dl {
+            match rx.try_recv() {
+                Ok(result) => {
+                    self.update_dl = None;
+                    match result.and_then(|path| update::run_installer(&path)) {
+                        Ok(()) => {
+                            // El instalador cierra y vuelve a abrir la aplicación; se sale para que pueda reemplazar el ejecutable.
+                            self.update_msg = Some("Installing… NeoGuitar will restart.".into());
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                        }
+                        Err(e) => self.update_msg = Some(e),
+                    }
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => ctx.request_repaint_after(Duration::from_millis(300)),
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => self.update_dl = None,
+            }
+        }
+    }
+
+    /// Botón de "actualización disponible" con su menú.
+    fn update_button(&mut self, ui: &mut egui::Ui) {
+        let Some(release) = self.update.clone() else { return };
+        let btn = theme::icon_label(ui, Some(Icon::Trend), &format!("Update to {}", release.version), true, true, false);
+        let ctx = ui.ctx().clone();
+        egui::Popup::menu(&btn).show(|ui| {
+            ui.set_min_width(260.0);
+            ui.label(RichText::new(format!("NeoGuitar {} is available", release.version)).strong());
+            ui.label(RichText::new(format!("You have {}", env!("CARGO_PKG_VERSION"))).size(12.0).color(theme::MUTED));
+            ui.add_space(6.0);
+            let can_install = release.installer.is_some() && update::is_installed_copy();
+            if can_install {
+                let busy = self.update_dl.is_some();
+                if ui.add_enabled(!busy, egui::Button::new("Download and install now")).on_hover_text("Downloads the installer from GitHub, verifies its checksum and restarts NeoGuitar").clicked() {
+                    self.start_update_download(&ctx, &release);
+                }
+            } else if release.installer.is_some() {
+                ui.label(RichText::new("This copy was not installed with the installer (portable), so download the new version from the release page.").size(12.0).color(theme::MUTED));
+            }
+            if ui.button("Open release page").clicked() {
+                ctx.open_url(egui::OpenUrl::new_tab(&release.page));
+                ui.close();
+            }
+            if let Some(m) = &self.update_msg {
+                ui.add_space(4.0);
+                ui.label(RichText::new(m).size(12.0).color(theme::MUTED));
+            }
+        });
+    }
+
     /// Recoge el resultado de la búsqueda de letra en curso.
     fn poll_lyrics(&mut self, ctx: &egui::Context) {
         let Some(rx) = &self.lyr_job else { return };
@@ -558,6 +684,9 @@ impl App {
 
     fn top_bar(&mut self, ui: &mut egui::Ui) {
         let labels: Vec<String> = self.song.as_ref().map(|s| s.tracks.iter().map(track_label).collect()).unwrap_or_default();
+        // Con poco ancho los botones de vista quedan solo con el icono.
+        let narrow = ui.available_width() < 1260.0 + if self.update.is_some() { 160.0 } else { 0.0 };
+        let label = move |s: &'static str| if narrow { "" } else { s };
         ui.horizontal(|ui| {
             if theme::primary_button(ui, "Open").on_hover_text("Ctrl+O").clicked() {
                 self.pick_file();
@@ -580,6 +709,7 @@ impl App {
             if let Some(p) = reopen {
                 self.open(&p);
             }
+            self.update_button(ui);
             if labels.is_empty() {
                 return;
             }
@@ -606,6 +736,13 @@ impl App {
                         self.export_ascii();
                         ui.close();
                     }
+                    ui.separator();
+                    if ui.button("Check for updates now").clicked() {
+                        let ctx = ui.ctx().clone();
+                        self.start_update_check(&ctx, true);
+                        ui.close();
+                    }
+                    ui.checkbox(&mut self.settings.check_updates, "Check for updates on startup").on_hover_text("Asks GitHub for the latest release, at most once a day. Nothing about you is sent.");
                     ui.separator();
                     if ui.button("Choose SoundFont…").clicked() {
                         self.pick_soundfont();
@@ -641,12 +778,12 @@ impl App {
                     self.zoom = (self.zoom - 0.1).max(0.6);
                 }
                 ui.add_space(6.0);
-                theme::chip(ui, Icon::Sidebar, self.show_side, "Panel").clicked().then(|| self.show_side = !self.show_side);
-                theme::chip(ui, Icon::Layers, self.multi, "Multi-track").on_hover_text("Show several tracks at once (pick which with the eye icon in the panel)").clicked().then(|| self.multi = !self.multi);
-                theme::chip(ui, Icon::Split, self.split, "Split").on_hover_text("Two tracks side by side").clicked().then(|| self.toggle_split());
-                theme::chip(ui, Icon::Lyrics, self.show_lyrics, "Lyrics").on_hover_text("Lyrics next to the score (search LRCLIB or load a file)").clicked().then(|| self.show_lyrics = !self.show_lyrics);
-                theme::chip(ui, Icon::Fretboard, self.show_fretboard, "Fretboard").on_hover_text("Show the sounding notes on the fretboard").clicked().then(|| self.show_fretboard = !self.show_fretboard);
-                theme::chip(ui, Icon::Staff, self.show_staff, "Staff").clicked().then(|| self.show_staff = !self.show_staff);
+                theme::chip(ui, Icon::Sidebar, self.show_side, label("Panel")).on_hover_text("Side panel").clicked().then(|| self.show_side = !self.show_side);
+                theme::chip(ui, Icon::Layers, self.multi, label("Multi-track")).on_hover_text("Show several tracks at once (pick which with the eye icon in the panel)").clicked().then(|| self.multi = !self.multi);
+                theme::chip(ui, Icon::Split, self.split, label("Split")).on_hover_text("Two tracks side by side").clicked().then(|| self.toggle_split());
+                theme::chip(ui, Icon::Lyrics, self.show_lyrics, label("Lyrics")).on_hover_text("Lyrics next to the score (search LRCLIB or load a file)").clicked().then(|| self.show_lyrics = !self.show_lyrics);
+                theme::chip(ui, Icon::Fretboard, self.show_fretboard, label("Fretboard")).on_hover_text("Show the sounding notes on the fretboard").clicked().then(|| self.show_fretboard = !self.show_fretboard);
+                theme::chip(ui, Icon::Staff, self.show_staff, label("Staff")).on_hover_text("Standard notation").clicked().then(|| self.show_staff = !self.show_staff);
             });
         });
         if let Some(err) = &self.error {
@@ -833,6 +970,7 @@ impl eframe::App for App {
             }
         }
         self.poll_lyrics(&ctx);
+        self.poll_updates(&ctx);
         self.player.sync_speed();
         self.persist_settings();
         if matches!(self.player.status, Status::Loading(_)) {
@@ -1060,6 +1198,10 @@ impl eframe::App for App {
 /// Carpeta donde se guardan las letras ya descargadas.
 fn lyrics_dir() -> Option<PathBuf> {
     Settings::path().and_then(|p| p.parent().map(|d| d.join("lyrics")))
+}
+
+fn unix_now() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
 fn track_label(t: &neoguitar::model::Track) -> String {

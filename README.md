@@ -24,6 +24,8 @@ A **Guitar Pro** tab reader, viewer and player written in Rust, with a UI built 
 
 Download the installer (`NeoGuitar-x.y.z-setup.exe`) or the portable zip from [Releases](https://github.com/Fiambre/NeoGuitar/releases). The installer does not need administrator rights (you can choose to install for all users) and has an optional checkbox to **associate .gp3, .gp4, .gp5, .gpx and .gp files with NeoGuitar**. You can also do that later from the app: **More → Associate Guitar Pro files**.
 
+**Updates:** on startup (at most once a day) NeoGuitar asks GitHub for the latest release and shows an **Update** button if there is a newer one. For copies installed with the installer, the button downloads the new installer from this repository's releases, verifies its SHA-256 checksum (published by GitHub) and runs it silently; NeoGuitar closes and reopens by itself. Portable copies only get a link to the release page. You can turn the check off or run it by hand in **More**. The request is anonymous: it sends nothing about you.
+
 The installer is not code-signed, so Windows SmartScreen will warn about an unknown publisher: click “More info” and then “Run anyway”.
 
 ## Build and run

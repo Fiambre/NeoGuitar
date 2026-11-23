@@ -24,6 +24,10 @@ pub struct Settings {
     pub trainer_on: bool,
     pub trainer_step: u32,
     pub trainer_max: u32,
+    /// Consultar GitHub al abrir (como mucho una vez al día) para avisar de versiones nuevas.
+    pub check_updates: bool,
+    /// Última consulta (segundos Unix).
+    pub last_update_check: u64,
     pub recent: Vec<PathBuf>,
 }
 
@@ -44,6 +48,8 @@ impl Default for Settings {
             trainer_on: false,
             trainer_step: 5,
             trainer_max: 100,
+            check_updates: true,
+            last_update_check: 0,
             recent: Vec::new(),
         }
     }
@@ -79,6 +85,8 @@ impl Settings {
                 "trainer_on" => s.trainer_on = parse_bool(value).unwrap_or(s.trainer_on),
                 "trainer_step" => s.trainer_step = value.parse::<u32>().map(|v| v.clamp(1, 25)).unwrap_or(s.trainer_step),
                 "trainer_max" => s.trainer_max = value.parse::<u32>().map(|v| v.clamp(30, 150)).unwrap_or(s.trainer_max),
+                "check_updates" => s.check_updates = parse_bool(value).unwrap_or(s.check_updates),
+                "last_update_check" => s.last_update_check = value.parse().unwrap_or(0),
                 "recent" if !value.is_empty() => {
                     let p = PathBuf::from(value);
                     if !s.recent.contains(&p) && s.recent.len() < MAX_RECENT {
@@ -103,6 +111,9 @@ impl Settings {
         out.push_str(&format!("speed={:.0}\nvolume={:.2}\n", self.speed, self.volume));
         out.push_str(&format!("metronome={}\ncount_in={}\n", b(self.metronome), b(self.count_in)));
         out.push_str(&format!("trainer_on={}\ntrainer_step={}\ntrainer_max={}\n", b(self.trainer_on), self.trainer_step, self.trainer_max));
+        out.push_str(&format!("check_updates={}
+last_update_check={}
+", b(self.check_updates), self.last_update_check));
         for p in &self.recent {
             out.push_str(&format!("recent={}\n", p.display()));
         }
