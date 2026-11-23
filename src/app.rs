@@ -470,16 +470,32 @@ impl App {
         let pos = self.player.position();
         let cur = if self.player.is_playing() || pos > 0.0 { lyrics::current(&state.data, &times, pos) } else { None };
         let next = cur.and_then(|c| lyrics::next_line(&state.data, c));
-        let cur_text = cur.map(|c| state.data.lines[c].text.clone()).unwrap_or_default();
-        let next_text = next.map(|n| state.data.lines[n].text.clone()).unwrap_or_default();
+        // Ventana de líneas: las dos anteriores (atenuadas), la actual y las tres siguientes.
+        let spoken: Vec<usize> = (0..state.data.lines.len()).filter(|&k| !state.data.lines[k].text.is_empty()).collect();
+        let at = match cur {
+            Some(c) => spoken.iter().position(|&k| k == c).unwrap_or(0) as isize,
+            None => -1,
+        };
+        let window: Vec<(isize, String)> = (at - 2..=at + 3)
+            .filter(|&p| p >= 0 && (p as usize) < spoken.len())
+            .map(|p| (p - at, state.data.lines[spoken[p as usize]].text.clone()))
+            .collect();
         let mut pin = None;
         let mut reset = false;
         let mut remove = false;
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
-                ui.set_min_width(ui.available_width() - 220.0);
-                ui.label(RichText::new(if cur_text.is_empty() { "…" } else { &cur_text }).size(21.0).strong().color(theme::ACCENT));
-                ui.label(RichText::new(if next_text.is_empty() { " " } else { &next_text }).size(15.0).color(theme::MUTED));
+                ui.set_min_width((ui.available_width() - 220.0).max(100.0));
+                ui.set_min_height(150.0);
+                for (rel, text) in &window {
+                    let rt = match rel {
+                        0 => RichText::new(text).size(22.0).strong().color(theme::ACCENT),
+                        r if *r < 0 => RichText::new(text).size(14.0).color(theme::MUTED.gamma_multiply(0.55)),
+                        1 => RichText::new(text).size(17.0).color(theme::TEXT),
+                        _ => RichText::new(text).size(15.0).color(theme::MUTED),
+                    };
+                    ui.label(rt);
+                }
             });
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if ui.button("Remove").clicked() {
