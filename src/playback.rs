@@ -77,6 +77,8 @@ pub struct Timeline {
     pub channels: Vec<u8>,
     /// Canales auxiliares por técnica: (pista, canal, programa), p. ej. guitarra apagada o armónicos.
     pub tech: Vec<(usize, u8, u8)>,
+    /// Pistas (bits) con guitarra eléctrica saturada: suenan por el sintetizador con simulación de amplificador.
+    pub amp: u64,
 }
 
 /// Programa General MIDI que mejor representa una técnica en una guitarra (programas 24..=30).
@@ -267,6 +269,11 @@ impl Timeline {
             }
         }
         tl.channels = channels.clone();
+        for (i, t) in song.tracks.iter().enumerate() {
+            if !t.is_percussion && matches!(t.program, 29 | 30) && i < 64 {
+                tl.amp |= 1u64 << i;
+            }
+        }
         if let Some(t) = song.tracks.iter().find(|t| t.is_percussion) {
             tl.setup.push((9, 0xB0, 7, t.volume.min(127)));
             tl.setup.push((9, 0xB0, 10, t.pan.min(127)));
@@ -320,6 +327,7 @@ impl Timeline {
         let mut open: HashMap<(usize, u8), usize> = HashMap::new(); // (pista, cuerda) -> spec
         let mut time = 0.0f64;
         let mut metronome: Vec<Event> = Vec::new();
+        let mut bar_events: Vec<Event> = Vec::new();
         for m in play_order(&song.headers) {
             let h = &song.headers[m];
             let length = h.length();
@@ -378,6 +386,27 @@ impl Timeline {
                         let dur = tm.secs(start_tick + dur_ticks) - start;
                         let spt = tm.spt_at(start_tick);
 
+                        // Barra de tremolo: dobla todo el canal de la pista (también las notas que aún suenan).
+                        if !track.is_percussion {
+                            if let Some(bar) = voice.notes.iter().find_map(|n| n.effect.tremolo_bar.as_ref()) {
+                                let mut chans = vec![channels[ti]];
+                                chans.extend(tl.tech.iter().filter(|x| x.0 == ti).map(|x| x.1));
+                                let (mut t, mut last) = (start - 0.002, i32::MIN);
+                                while t <= start + dur {
+                                    let v = bend_value(curve_at(bar, ((t - start) / dur.max(1e-3)).clamp(0.0, 1.0) as f32)) as i32;
+                                    if (v - last).abs() >= 3 {
+                                        for &c in &chans {
+                                            bar_events.push(Event { time: t.max(0.0), channel: c, track: ti.min(249) as u8, kind: Kind::Bend(v as u16) });
+                                        }
+                                        last = v;
+                                    }
+                                    t += 0.012;
+                                }
+                                for &c in &chans {
+                                    bar_events.push(Event { time: start + dur + 0.1, channel: c, track: ti.min(249) as u8, kind: Kind::Bend(BEND_CENTER as u16) });
+                                }
+                            }
+                        }
                         let strummed = !track.is_percussion && (24..=31).contains(&track.program) && voice.notes.len() >= 3;
                         for note in &voice.notes {
                             let open_key = if track.is_percussion {
@@ -513,7 +542,11 @@ impl Timeline {
                                 end: start_note + (length - (start_note - start)).max(0.02),
                                 velocity: velocity.clamp(1, 127),
                                 spt,
-                                fx: note.effect.clone(),
+                                fx: {
+                                    let mut f = note.effect.clone();
+                                    f.tremolo_bar = None; // ya se aplicó al canal completo
+                                    f
+                                },
                                 silent: false,
                                 legato: false,
                                 slide_target: None,
@@ -570,6 +603,7 @@ impl Timeline {
             emit_note(s, &mut pool, &mut events);
         }
         events.extend(metronome);
+        events.extend(bar_events);
         events.sort_by(|a, b| a.time.total_cmp(&b.time).then(a.priority().cmp(&b.priority())));
         tl.events = events;
         tl
@@ -594,7 +628,7 @@ impl Timeline {
                 e
             })
             .collect();
-        Timeline { events, segs: self.segs.clone(), setup: self.setup.clone(), total: self.total, channels: self.channels.clone(), tech: self.tech.clone() }
+        Timeline { events, segs: self.segs.clone(), setup: self.setup.clone(), total: self.total, channels: self.channels.clone(), tech: self.tech.clone(), amp: self.amp }
     }
 
     pub fn position(&self, t: f64) -> Option<(usize, u64)> {
@@ -910,6 +944,11 @@ impl Shared {
 
 pub struct Engine {
     synth: Synthesizer,
+    /// Segundo sintetizador para las guitarras saturadas: su salida pasa por el amplificador antes de mezclarse.
+    amp: Synthesizer,
+    amp_dsp: AmpDsp,
+    amp_l: Vec<f32>,
+    amp_r: Vec<f32>,
     rx: Receiver<Cmd>,
     shared: Arc<Shared>,
     timeline: Arc<Timeline>,
@@ -935,12 +974,67 @@ struct Lead {
 
 const BLOCK: usize = 64;
 
+/// Simulación sencilla de amplificador de guitarra: filtro de graves, saturación y altavoz (pasa-bajos).
+struct AmpDsp {
+    hp_a: f32,
+    lp_b: f32,
+    hp_x: [f32; 2],
+    hp_y: [f32; 2],
+    lp1: [f32; 2],
+    lp2: [f32; 2],
+}
+
+impl AmpDsp {
+    const DRIVE: f32 = 2.6;
+    const OUTPUT: f32 = 0.6;
+
+    fn new(sample_rate: f32) -> AmpDsp {
+        let tau = std::f32::consts::TAU;
+        AmpDsp {
+            hp_a: 1.0 / (1.0 + tau * 90.0 / sample_rate),
+            lp_b: 1.0 - (-tau * 4800.0 / sample_rate).exp(),
+            hp_x: [0.0; 2],
+            hp_y: [0.0; 2],
+            lp1: [0.0; 2],
+            lp2: [0.0; 2],
+        }
+    }
+
+    fn reset(&mut self) {
+        self.hp_x = [0.0; 2];
+        self.hp_y = [0.0; 2];
+        self.lp1 = [0.0; 2];
+        self.lp2 = [0.0; 2];
+    }
+
+    fn process(&mut self, left: &mut [f32], right: &mut [f32]) {
+        for (c, buf) in [left, right].into_iter().enumerate() {
+            for x in buf.iter_mut() {
+                let hp = self.hp_a * (self.hp_y[c] + *x - self.hp_x[c]);
+                self.hp_x[c] = *x;
+                self.hp_y[c] = hp;
+                // Saturación asimétrica suave (armónicos pares e impares) sin desplazamiento de continua.
+                let bias = 0.12;
+                let sat = ((hp * Self::DRIVE + bias).tanh() - bias.tanh()) / Self::DRIVE.sqrt();
+                self.lp1[c] += self.lp_b * (sat - self.lp1[c]);
+                self.lp2[c] += self.lp_b * (self.lp1[c] - self.lp2[c]);
+                *x = self.lp2[c] * Self::OUTPUT;
+            }
+        }
+    }
+}
+
 impl Engine {
     pub fn new(font: Arc<SoundFont>, sample_rate: u32, shared: Arc<Shared>, rx: Receiver<Cmd>) -> Result<Engine, String> {
         let settings = SynthesizerSettings::new(sample_rate as i32);
         let synth = Synthesizer::new(&font, &settings).map_err(|e| format!("{e}"))?;
+        let amp = Synthesizer::new(&font, &settings).map_err(|e| format!("{e}"))?;
         Ok(Engine {
             synth,
+            amp,
+            amp_dsp: AmpDsp::new(sample_rate as f32),
+            amp_l: vec![0.0; BLOCK],
+            amp_r: vec![0.0; BLOCK],
             rx,
             shared,
             timeline: Arc::new(Timeline::default()),
@@ -954,21 +1048,35 @@ impl Engine {
         })
     }
 
+    /// Mensaje de canal para los dos sintetizadores (configuración que no depende de la pista).
+    fn all(&mut self, ch: i32, cmd: i32, d1: i32, d2: i32) {
+        self.synth.process_midi_message(ch, cmd, d1, d2);
+        self.amp.process_midi_message(ch, cmd, d1, d2);
+    }
+
+    /// ¿Esta pista suena por el amplificador?
+    fn amped(&self, track: u8) -> bool {
+        track < 64 && self.timeline.amp & (1u64 << track) != 0
+    }
+
     /// Silencia todo y deja el pitch bend de cada canal en el centro.
     fn silence(&mut self, immediate: bool) {
         self.synth.note_off_all(immediate);
+        self.amp.note_off_all(immediate);
+        self.amp_dsp.reset();
         for ch in 0..16 {
-            self.synth.process_midi_message(ch, 0xE0, 0, 64);
+            self.all(ch, 0xE0, 0, 64);
         }
     }
 
     /// Envía la configuración inicial de los canales (programa, volumen, pan) y restablece la mezcla aplicada.
     fn apply_setup(&mut self) {
         for ch in 0..16 {
-            self.synth.process_midi_message(ch, 0xB0, 91, DEFAULT_REVERB as i32);
+            self.all(ch, 0xB0, 91, DEFAULT_REVERB as i32);
         }
-        for &(ch, cmd, d1, d2) in &self.timeline.setup {
-            self.synth.process_midi_message(ch as i32, cmd as i32, d1 as i32, d2 as i32);
+        let tl = self.timeline.clone();
+        for &(ch, cmd, d1, d2) in &tl.setup {
+            self.all(ch as i32, cmd as i32, d1 as i32, d2 as i32);
         }
         // La próxima sincronización vuelve a aplicar lo que el usuario haya cambiado.
         self.applied = vec![[MIX_FILE; 3]; 64];
@@ -997,27 +1105,27 @@ impl Engine {
             if cur[0] != self.applied[t][0] {
                 let v = if cur[0] != MIX_FILE { Some(cur[0]) } else { self.file_value(ch, 0xB0, 10) };
                 if let Some(v) = v {
-                    self.synth.process_midi_message(ch as i32, 0xB0, 10, v as i32);
+                    self.all(ch as i32, 0xB0, 10, v as i32);
                     for &(tc, _) in &tech {
-                        self.synth.process_midi_message(tc as i32, 0xB0, 10, v as i32);
+                        self.all(tc as i32, 0xB0, 10, v as i32);
                     }
                 }
             }
             if cur[1] != self.applied[t][1] && ch != 9 {
                 let v = if cur[1] != MIX_FILE { Some(cur[1]) } else { self.file_value(ch, 0xC0, 0) };
                 if let Some(v) = v {
-                    self.synth.process_midi_message(ch as i32, 0xC0, v as i32, 0);
+                    self.all(ch as i32, 0xC0, v as i32, 0);
                 }
                 for &(tc, tp) in &tech {
                     let p = if cur[1] != MIX_FILE { cur[1] } else { tp };
-                    self.synth.process_midi_message(tc as i32, 0xC0, p as i32, 0);
+                    self.all(tc as i32, 0xC0, p as i32, 0);
                 }
             }
             if cur[2] != self.applied[t][2] {
                 let v = if cur[2] != MIX_FILE { cur[2] } else { DEFAULT_REVERB };
-                self.synth.process_midi_message(ch as i32, 0xB0, 91, v as i32);
+                self.all(ch as i32, 0xB0, 91, v as i32);
                 for &(tc, _) in &tech {
-                    self.synth.process_midi_message(tc as i32, 0xB0, 91, v as i32);
+                    self.all(tc as i32, 0xB0, 91, v as i32);
                 }
             }
             self.applied[t] = cur;
@@ -1068,6 +1176,7 @@ impl Engine {
                 self.lead = None;
                 self.playing = false;
                 self.synth.note_off_all(false);
+                self.amp.note_off_all(false);
             }
             Cmd::Stop => {
                 self.lead = None;
@@ -1081,12 +1190,16 @@ impl Engine {
                 self.speed = s.clamp(0.1, 4.0) as f64;
                 self.shared.speed_pct.store((self.speed * 100.0).round() as u32, Ordering::Relaxed);
             }
-            Cmd::SetVolume(v) => self.synth.set_master_volume(v.clamp(0.0, 2.0)),
+            Cmd::SetVolume(v) => {
+                self.synth.set_master_volume(v.clamp(0.0, 2.0));
+                self.amp.set_master_volume(v.clamp(0.0, 2.0));
+            }
         }
     }
 
     fn fire(&mut self, ev: Event, mask: u64, metronome: bool) {
         let ch = ev.channel as i32;
+        let amped = self.amped(ev.track);
         match ev.kind {
             Kind::NoteOn { key, velocity } => {
                 let enabled = if ev.track == METRONOME_TRACK { metronome } else { ev.track >= 64 || mask & (1u64 << ev.track) != 0 };
@@ -1094,18 +1207,38 @@ impl Engine {
                     // Ganancia por pista (mixer de la interfaz), en porcentaje.
                     let gain = self.shared.gains.get(ev.track as usize).map(|g| g.load(Ordering::Relaxed) as i32).unwrap_or(100);
                     let v = (velocity as i32 * gain / 100).clamp(1, 127);
-                    self.synth.note_on(ch, key as i32, v);
+                    if amped {
+                        self.amp.note_on(ch, key as i32, v);
+                    } else {
+                        self.synth.note_on(ch, key as i32, v);
+                    }
                 }
             }
-            Kind::NoteOff { key } => self.synth.note_off(ch, key as i32),
-            Kind::Program(p) => {
-                let over = self.shared.mix_program.get(ev.track as usize).map(|a| a.load(Ordering::Relaxed)).unwrap_or(MIX_FILE);
-                self.synth.process_midi_message(ch, 0xC0, if over != MIX_FILE { over } else { p } as i32, 0)
+            Kind::NoteOff { key } => {
+                if amped {
+                    self.amp.note_off(ch, key as i32);
+                } else {
+                    self.synth.note_off(ch, key as i32);
+                }
             }
-            Kind::Bend(v) => self.synth.process_midi_message(ch, 0xE0, (v & 0x7f) as i32, ((v >> 7) & 0x7f) as i32),
-            Kind::Control { cc, value } => {
-                let over = if cc == 10 { self.shared.mix_pan.get(ev.track as usize).map(|a| a.load(Ordering::Relaxed)).unwrap_or(MIX_FILE) } else { MIX_FILE };
-                self.synth.process_midi_message(ch, 0xB0, cc as i32, if over != MIX_FILE { over } else { value } as i32)
+            _ => {
+                let (cmd, d1, d2) = match ev.kind {
+                    Kind::Program(p) => {
+                        let over = self.shared.mix_program.get(ev.track as usize).map(|a| a.load(Ordering::Relaxed)).unwrap_or(MIX_FILE);
+                        (0xC0, if over != MIX_FILE { over } else { p } as i32, 0)
+                    }
+                    Kind::Bend(v) => (0xE0, (v & 0x7f) as i32, ((v >> 7) & 0x7f) as i32),
+                    Kind::Control { cc, value } => {
+                        let over = if cc == 10 { self.shared.mix_pan.get(ev.track as usize).map(|a| a.load(Ordering::Relaxed)).unwrap_or(MIX_FILE) } else { MIX_FILE };
+                        (0xB0, cc as i32, if over != MIX_FILE { over } else { value } as i32)
+                    }
+                    _ => return,
+                };
+                if amped {
+                    self.amp.process_midi_message(ch, cmd, d1, d2);
+                } else {
+                    self.synth.process_midi_message(ch, cmd, d1, d2);
+                }
             }
         }
     }
@@ -1177,6 +1310,14 @@ impl Engine {
                 }
             }
             self.synth.render(&mut left[done..done + chunk], &mut right[done..done + chunk]);
+            if self.timeline.amp != 0 {
+                self.amp.render(&mut self.amp_l[..chunk], &mut self.amp_r[..chunk]);
+                self.amp_dsp.process(&mut self.amp_l[..chunk], &mut self.amp_r[..chunk]);
+                for i in 0..chunk {
+                    left[done + i] += self.amp_l[i];
+                    right[done + i] += self.amp_r[i];
+                }
+            }
             done += chunk;
         }
         self.shared.pos.store(self.pos.to_bits(), Ordering::Relaxed);

@@ -454,3 +454,48 @@ fn technique_channels_and_strum() {
     starts.dedup_by(|a, b| (*a - *b).abs() < 1e-9);
     assert!(starts.windows(2).any(|w| w[1] - w[0] > 0.0 && w[1] - w[0] < 0.05), "expected staggered chord notes");
 }
+
+#[test]
+fn amp_synth_and_tremolo_bar() {
+    let sf = format!("{}/soundfonts/GeneralUser-GS.sf2", env!("CARGO_MANIFEST_DIR"));
+    let Ok(mut file) = std::fs::File::open(&sf) else { return };
+    let font = Arc::new(SoundFont::new(&mut file).unwrap());
+
+    // A distortion guitar goes through the amp synth: audible, finite and not clipping.
+    let mut song = load("extra/Chords.gp5");
+    for t in song.tracks.iter_mut().filter(|t| !t.is_percussion) {
+        t.program = 30;
+    }
+    let tl = Arc::new(Timeline::build(&song));
+    assert_ne!(tl.amp, 0);
+    let (tx, rx) = channel();
+    let shared = Arc::new(Shared::default());
+    shared.mask.store(u64::MAX, Ordering::Relaxed);
+    let mut engine = Engine::new(font, 44100, shared, rx).unwrap();
+    tx.send(Cmd::SetTimeline(tl)).unwrap();
+    tx.send(Cmd::Play).unwrap();
+    let (mut l, mut r) = (vec![0f32; 512], vec![0f32; 512]);
+    let mut peak = 0f32;
+    for _ in 0..(44100 * 6 / 512) {
+        engine.render(&mut l, &mut r);
+        for i in 0..512 {
+            assert!(l[i].is_finite() && r[i].is_finite());
+            peak = peak.max(l[i].abs()).max(r[i].abs());
+        }
+    }
+    assert!(peak > 0.02 && peak < 1.5, "peak {peak}");
+
+    // The tremolo bar bends the whole track channel (not only one note).
+    let mut found = false;
+    for name in ["extra/Effects.gp5", "extra/Effects.gp4", "extra/Effects.gp3", "extra/Wah.gp5", "extra/Demo v5.gp5"] {
+        let song = load(name);
+        let has_bar = song.tracks.iter().any(|t| t.measures.iter().any(|m| m.beats.iter().any(|b| b.voices.iter().any(|v| v.notes.iter().any(|n| n.effect.tremolo_bar.is_some())))));
+        if !has_bar {
+            continue;
+        }
+        let tl = Timeline::build(&song);
+        assert!(tl.events.iter().any(|e| matches!(e.kind, Kind::Bend(_)) && tl.channels.contains(&e.channel)), "{name}: no bend on the track channel");
+        found = true;
+    }
+    assert!(found, "no sample with a tremolo bar");
+}
