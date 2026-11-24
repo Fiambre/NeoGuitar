@@ -3,7 +3,7 @@
 //! La guitarra se escribe una octava por encima de lo que suena. Se dibuja una voz por
 //! plica: con dos voces, la primera lleva plica hacia arriba y la segunda hacia abajo.
 
-use eframe::egui::{self, Align2, Color32, FontFamily, FontId, Painter, Pos2, Rect, Stroke, vec2};
+use egui::{self, Align2, Color32, FontFamily, FontId, Painter, Pos2, Rect, Stroke, vec2};
 use neoguitar_core::model::*;
 use std::collections::HashMap;
 use std::sync::Arc;

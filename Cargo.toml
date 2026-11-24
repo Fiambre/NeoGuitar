@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/neoguitar-core", "neoguitar-win", "neoguitar-android"]
+members = ["crates/neoguitar-core", "crates/neoguitar-ui", "neoguitar-win", "neoguitar-android"]
 resolver = "3"
 
 [workspace.package]

@@ -5,7 +5,9 @@ Guitar Pro (GP3 to GP7) reader, viewer and player written in Rust.
 ```
 NeoGuitar/
 ├─ crates/neoguitar-core/   parser, song model, playback engine, SoundFont synthesis, lyrics (no UI)
+├─ crates/neoguitar-ui/     shared egui views: tablature, staff, fretboard, theme
 ├─ neoguitar-win/           Windows desktop app (egui), installer and updater
+├─ neoguitar-android/       Android practice app (egui on NativeActivity); `android/build-apk.ps1 -Install`
 ├─ soundfonts/              GeneralUser GS, shared by every app
 ├─ samples/                 files used by the tests
 ├─ vendor/rustysynth/       patched copy of the synthesizer (accepts SoundFonts with empty instruments)

@@ -12,6 +12,8 @@ crate-type = ["cdylib"]
 # Everything is Android-only, so `cargo build --workspace` on a desktop still works (it builds an empty library).
 [target.'cfg(target_os = "android")'.dependencies]
 neoguitar-core = { path = "../crates/neoguitar-core" }
+neoguitar-ui = { path = "../crates/neoguitar-ui" }
+egui = "0.37.0"
 eframe = { version = "0.37.0", default-features = false, features = ["android-native-activity", "glow", "default_fonts"] }
 android-activity = { version = "0.6", features = ["native-activity"] }
 android_logger = "0.15"

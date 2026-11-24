@@ -26,7 +26,9 @@ try {
     Copy-Item "$repo\samples\extra\Demo v5.gp5" "$out\assets\demo.gp5"
     Copy-Item $so "$out\lib\$Abi\"
 
-    & "$bt\aapt2.exe" link -o "$out\base.apk" -I $jar --manifest "$PSScriptRoot\AndroidManifest.xml" -A "$out\assets" `
+    & "$bt\aapt2.exe" compile --dir "$PSScriptRoot\res" -o "$out\res.zip"
+    if ($LASTEXITCODE -ne 0) { throw "aapt2 compile failed" }
+    & "$bt\aapt2.exe" link -o "$out\base.apk" -I $jar --manifest "$PSScriptRoot\AndroidManifest.xml" -A "$out\assets" "$out\res.zip" `
         --min-sdk-version $minSdk --target-sdk-version 34 --version-code 1 --version-name 0.1.0
     if ($LASTEXITCODE -ne 0) { throw "aapt2 failed" }
 

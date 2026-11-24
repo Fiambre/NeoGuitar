@@ -1,5 +1,5 @@
-use crate::theme::{self, Icon, IconStyle};
-use crate::tab_view::{self, ViewAction};
+use neoguitar_ui::theme::{self, Icon, IconStyle};
+use neoguitar_ui::tab_view::{self, ViewAction};
 use eframe::egui::{self, Align, Layout, RichText};
 use neoguitar_core::audio::{Player, Status};
 use neoguitar_core::lyrics::{self, Lyrics};
@@ -1052,7 +1052,7 @@ impl eframe::App for App {
                     Vec::new()
                 };
                 egui::Panel::bottom("fretboard").frame(theme::panel_frame(egui::Margin::symmetric(14, 8))).show_separator_line(true).show(ui, |ui| {
-                    crate::fretboard::show(ui, track, &active);
+                    neoguitar_ui::fretboard::show(ui, track, &active);
                 });
             }
         }

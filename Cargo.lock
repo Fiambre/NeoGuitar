@@ -2123,8 +2123,10 @@ dependencies = [
  "android-activity",
  "android_logger",
  "eframe",
+ "egui",
  "log",
  "neoguitar-core",
+ "neoguitar-ui",
 ]
 
 [[package]]
@@ -2140,12 +2142,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "neoguitar-ui"
+version = "0.3.0"
+dependencies = [
+ "egui",
+ "neoguitar-core",
+]
+
+[[package]]
 name = "neoguitar-win"
 version = "0.3.0"
 dependencies = [
  "eframe",
  "embed-resource",
  "neoguitar-core",
+ "neoguitar-ui",
  "png",
  "rfd",
  "serde_json",

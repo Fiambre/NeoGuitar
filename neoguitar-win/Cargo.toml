@@ -17,6 +17,7 @@ path = "src/lib.rs"
 
 [dependencies]
 neoguitar-core = { path = "../crates/neoguitar-core" }
+neoguitar-ui = { path = "../crates/neoguitar-ui" }
 eframe = "0.37.0"
 png = "0.18.1"
 rfd = "0.18.0"

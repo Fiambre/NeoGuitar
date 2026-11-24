@@ -1,7 +1,7 @@
 //! Mástil virtual: dibuja el brazo de la guitarra con las notas que suenan en el instante actual.
 
 use crate::theme;
-use eframe::egui::{self, Align2, Color32, FontId, Pos2, Rect, Sense, Stroke, Ui, vec2};
+use egui::{self, Align2, Color32, FontId, Pos2, Rect, Sense, Stroke, Ui, vec2};
 use neoguitar_core::model::{midi_note_name, Track};
 
 const FRETS: usize = 24;

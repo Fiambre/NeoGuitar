@@ -1,6 +1,6 @@
 //! Dibujo de la tablatura de una pista.
 
-use eframe::egui::{self, Align2, Color32, FontId, Pos2, Rect, Stroke, Ui, vec2};
+use egui::{self, Align2, Color32, FontId, Pos2, Rect, Stroke, Ui, vec2};
 use crate::staff;
 use neoguitar_core::model::*;
 use std::collections::HashMap;

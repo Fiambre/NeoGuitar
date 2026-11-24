@@ -6,13 +6,15 @@
         android:label="NeoGuitar"
         android:hasCode="false"
         android:extractNativeLibs="true"
-        android:allowBackup="true">
+        android:allowBackup="true"
+        android:theme="@style/AppTheme">
 
         <activity
             android:name="android.app.NativeActivity"
             android:exported="true"
             android:label="NeoGuitar"
             android:launchMode="singleTask"
+            android:screenOrientation="sensorLandscape"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|screenLayout|uiMode|density|locale|layoutDirection">
             <meta-data android:name="android.app.lib_name" android:value="neoguitar_android" />
             <intent-filter>

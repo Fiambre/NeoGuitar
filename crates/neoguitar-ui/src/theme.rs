@@ -1,6 +1,6 @@
 //! Tema visual de NeoGuitar: paleta oscura sobria, tipografía y pequeños widgets propios.
 
-use eframe::egui::{
+use egui::{
     self, Color32, CornerRadius, FontData, FontDefinitions, FontFamily, FontId, Margin, Response, RichText, Sense, Shape, Stroke, StrokeKind, TextStyle, Ui, Vec2, vec2,
 };
 use std::sync::Arc;
