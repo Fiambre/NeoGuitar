@@ -95,6 +95,11 @@ try {
         & "$env:JAVA_HOME\bin\jarsigner.exe" -keystore $Keystore -storepass:env NEOGUITAR_KS_PASS -sigalg SHA256withRSA -digestalg SHA-256 $aab $Alias
         if ($LASTEXITCODE -ne 0) { throw "jarsigner failed" }
         Write-Host "AAB: $aab ($([math]::Round((Get-Item $aab).Length / 1MB, 1)) MB)"
+        # Also a release APK signed with the same key, so manual installs can be updated in place.
+        $relApk = "$out\NeoGuitar-$versionName.apk"
+        & "$bt\apksigner.bat" sign --ks $Keystore --ks-pass env:NEOGUITAR_KS_PASS --ks-key-alias $Alias --out $relApk "$out\aligned.apk"
+        if ($LASTEXITCODE -ne 0) { throw "apksigner (release) failed" }
+        Write-Host "APK: $relApk"
     }
 
     if ($Install) {

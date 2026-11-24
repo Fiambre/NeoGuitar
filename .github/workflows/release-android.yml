@@ -1,0 +1,86 @@
+name: Release (Android)
+
+# Pushing an android-vX.Y.Z tag builds the Android app and publishes a GitHub release with the signed AAB
+# (for Google Play) and an APK (for installing by hand). The version must match neoguitar-android/Cargo.toml.
+# It can also be run by hand (workflow_dispatch): it produces the files as artifacts without creating a release.
+# Needs two repository secrets: ANDROID_KEYSTORE_BASE64 (the upload key, base64) and ANDROID_KEYSTORE_PASSWORD.
+# The release is never marked "latest" so it does not interfere with the Windows updater.
+on:
+  push:
+    tags: ["android-v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  android:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Version
+        id: ver
+        shell: pwsh
+        run: |
+          $cargo = (Select-String -Path neoguitar-android/Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
+          if ("${{ github.ref_type }}" -eq "tag") {
+            $tag = "${{ github.ref_name }}" -replace '^android-v', ''
+            if ($tag -ne $cargo) { throw "Tag version $tag does not match neoguitar-android/Cargo.toml ($cargo)" }
+          }
+          $p = $cargo.Split('.')
+          # versionCode must only ever grow: 1.2.3 -> 1002003
+          $code = [int]$p[0] * 1000000 + [int]$p[1] * 1000 + [int]$p[2]
+          "version=$cargo" >> $env:GITHUB_OUTPUT
+          "code=$code" >> $env:GITHUB_OUTPUT
+
+      - name: Android SDK pieces and bundletool
+        shell: pwsh
+        run: |
+          $sdk = $env:ANDROID_HOME
+          $sm = (Get-ChildItem "$sdk\cmdline-tools" -Recurse -Filter sdkmanager.bat | Select-Object -First 1).FullName
+          "y`ny`ny`ny`ny`n" | & $sm --licenses | Out-Null
+          & $sm "platforms;android-36" "build-tools;36.0.0" "ndk;27.2.12479018"
+          if ($LASTEXITCODE -ne 0) { throw "sdkmanager failed" }
+          "ANDROID_NDK_HOME=$sdk\ndk\27.2.12479018" >> $env:GITHUB_ENV
+          $tools = "$env:LOCALAPPDATA\Android\tools"
+          New-Item -ItemType Directory -Force $tools | Out-Null
+          gh release download --repo google/bundletool --pattern "bundletool-all-*.jar" --dir $tools --clobber
+          cargo install cargo-ndk --locked
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Build and sign
+        shell: pwsh
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          NEOGUITAR_KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          if (-not $env:KEYSTORE_B64 -or -not $env:NEOGUITAR_KS_PASS) { throw "Missing ANDROID_KEYSTORE_BASE64 / ANDROID_KEYSTORE_PASSWORD secrets" }
+          $ks = "$env:RUNNER_TEMP\upload.jks"
+          [IO.File]::WriteAllBytes($ks, [Convert]::FromBase64String($env:KEYSTORE_B64))
+          ./neoguitar-android/android/build-apk.ps1 -Bundle -Keystore $ks -VersionCode ${{ steps.ver.outputs.code }}
+          if ($LASTEXITCODE -ne 0 -and $null -ne $LASTEXITCODE) { throw "build failed" }
+          Remove-Item $ks
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: neoguitar-android-${{ steps.ver.outputs.version }}
+          path: |
+            target/android/NeoGuitar-${{ steps.ver.outputs.version }}.aab
+            target/android/NeoGuitar-${{ steps.ver.outputs.version }}.apk
+
+      - name: Publish release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          name: NeoGuitar for Android ${{ steps.ver.outputs.version }}
+          make_latest: "false"
+          generate_release_notes: true
+          files: |
+            target/android/NeoGuitar-${{ steps.ver.outputs.version }}.aab
+            target/android/NeoGuitar-${{ steps.ver.outputs.version }}.apk
