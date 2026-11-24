@@ -20,6 +20,9 @@ pub struct Settings {
     pub volume: f32,
     pub metronome: bool,
     pub count_in: bool,
+    /// Compases de clics de la cuenta previa (1 o 2) y segundos de espera antes del primer clic.
+    pub count_in_measures: u32,
+    pub count_in_delay: f32,
     /// Entrenador de velocidad: sube `trainer_step` % cada vuelta del bucle hasta `trainer_max` %.
     pub trainer_on: bool,
     pub trainer_step: u32,
@@ -45,6 +48,8 @@ impl Default for Settings {
             volume: 1.0,
             metronome: false,
             count_in: false,
+            count_in_measures: 1,
+            count_in_delay: 0.0,
             trainer_on: false,
             trainer_step: 5,
             trainer_max: 100,
@@ -82,6 +87,8 @@ impl Settings {
                 "volume" => s.volume = value.parse::<f32>().map(|v| v.clamp(0.0, 1.5)).unwrap_or(s.volume),
                 "metronome" => s.metronome = parse_bool(value).unwrap_or(s.metronome),
                 "count_in" => s.count_in = parse_bool(value).unwrap_or(s.count_in),
+                "count_in_measures" => s.count_in_measures = value.parse::<u32>().map(|n| n.clamp(1, 2)).unwrap_or(1),
+                "count_in_delay" => s.count_in_delay = value.parse::<f32>().map(|d| d.clamp(0.0, 10.0)).unwrap_or(0.0),
                 "trainer_on" => s.trainer_on = parse_bool(value).unwrap_or(s.trainer_on),
                 "trainer_step" => s.trainer_step = value.parse::<u32>().map(|v| v.clamp(1, 25)).unwrap_or(s.trainer_step),
                 "trainer_max" => s.trainer_max = value.parse::<u32>().map(|v| v.clamp(30, 150)).unwrap_or(s.trainer_max),
@@ -110,6 +117,7 @@ impl Settings {
         out.push_str(&format!("show_fretboard={}\n", b(self.show_fretboard)));
         out.push_str(&format!("speed={:.0}\nvolume={:.2}\n", self.speed, self.volume));
         out.push_str(&format!("metronome={}\ncount_in={}\n", b(self.metronome), b(self.count_in)));
+        out.push_str(&format!("count_in_measures={}\ncount_in_delay={}\n", self.count_in_measures, self.count_in_delay));
         out.push_str(&format!("trainer_on={}\ntrainer_step={}\ntrainer_max={}\n", b(self.trainer_on), self.trainer_step, self.trainer_max));
         out.push_str(&format!("check_updates={}
 last_update_check={}

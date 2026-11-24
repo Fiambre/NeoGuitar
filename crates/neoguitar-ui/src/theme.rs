@@ -415,3 +415,26 @@ pub fn track_color([r, g, b]: [u8; 3]) -> Color32 {
     let mix = |x: u8| (x as f32 + (200.0 - x as f32) * t).round().clamp(0.0, 255.0) as u8;
     Color32::from_rgb(mix(r), mix(g), mix(b))
 }
+
+/// Contents of the count-in menu, shared by the apps: on/off, seconds to get ready and measures of clicks.
+/// Returns `true` if anything changed.
+pub fn count_in_controls(ui: &mut Ui, on: &mut bool, measures: &mut u32, delay: &mut f32) -> bool {
+    let mut changed = false;
+    ui.set_min_width(250.0);
+    changed |= ui.checkbox(on, "Count in before playing").changed();
+    ui.add_space(4.0);
+    ui.label(RichText::new("Time to get ready").size(12.0).color(MUTED));
+    ui.spacing_mut().slider_width = 190.0;
+    changed |= ui.add(egui::Slider::new(delay, 0.0..=10.0).step_by(0.5).suffix(" s").custom_formatter(|v, _| if v < 0.05 { "none".to_string() } else { format!("{v:.1} s") })).changed();
+    ui.add_space(2.0);
+    ui.label(RichText::new("Clicks").size(12.0).color(MUTED));
+    ui.horizontal(|ui| {
+        for (n, label) in [(1u32, "1 measure"), (2, "2 measures")] {
+            if ui.selectable_label(*measures == n, label).clicked() {
+                *measures = n;
+                changed = true;
+            }
+        }
+    });
+    changed
+}

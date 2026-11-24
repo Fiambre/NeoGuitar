@@ -136,6 +136,8 @@ impl App {
         }
         // Se restauran los ajustes del reproductor.
         app.player.set_speed(app.settings.speed / 100.0);
+        app.player.count_in_measures = app.settings.count_in_measures;
+        app.player.count_in_delay = app.settings.count_in_delay;
         app.player.set_volume(app.settings.volume);
         app.player.set_metronome(app.settings.metronome);
         app.player.set_trainer(app.settings.trainer_on, app.settings.trainer_step, app.settings.trainer_max);
@@ -247,6 +249,8 @@ impl App {
         s.volume = self.player.volume;
         s.metronome = self.player.metronome();
         s.count_in = self.count_in;
+        s.count_in_measures = self.player.count_in_measures;
+        s.count_in_delay = self.player.count_in_delay;
         if let Status::Ready(p) = &self.player.status {
             s.soundfont = Some(p.clone());
         }
@@ -867,9 +871,10 @@ impl App {
             if theme::chip_enabled(ui, Icon::Loop, looping, &loop_label, has_loop).on_hover_text(hint).clicked() {
                 self.player.set_loop_enabled(!looping);
             }
-            if theme::chip(ui, Icon::Timer, self.count_in, "Count-in").on_hover_text("One measure of clicks before starting").clicked() {
-                self.count_in = !self.count_in;
-            }
+            let count_chip = theme::chip(ui, Icon::Timer, self.count_in, "Count-in").on_hover_text("Clicks before starting; click to set how many and how long to wait");
+            egui::Popup::menu(&count_chip).show(|ui| {
+                theme::count_in_controls(ui, &mut self.count_in, &mut self.player.count_in_measures, &mut self.player.count_in_delay);
+            });
             let tone_label = match self.player.transpose {
                 0 => "Transpose".to_string(),
                 n => format!("Transpose {n:+}"),

@@ -34,6 +34,10 @@ pub struct Player {
     pub volume: f32,
     /// Compases (desde, hasta) del bucle, base 0, ambos inclusive.
     pub loop_measures: Option<(usize, usize)>,
+    /// Compases de clics de la cuenta previa (1 a 4).
+    pub count_in_measures: u32,
+    /// Segundos de espera antes del primer clic de la cuenta previa (0 a 30).
+    pub count_in_delay: f32,
 }
 
 impl Player {
@@ -55,6 +59,8 @@ impl Player {
             speed: 1.0,
             volume: 1.0,
             loop_measures: None,
+            count_in_measures: 1,
+            count_in_delay: 0.0,
         };
         let chosen = soundfont.filter(|p| p.is_file()).or_else(find_soundfont);
         if let Some(path) = chosen {
@@ -173,10 +179,14 @@ impl Player {
         self.send(Cmd::Play);
     }
 
-    /// Como `play`, pero con una cuenta regresiva de un compás antes de empezar.
+    /// Como `play`, pero con una cuenta regresiva antes de empezar: `count_in_measures` compases de clics,
+    /// precedidos por `count_in_delay` segundos de espera para que el músico se prepare.
     pub fn play_with_count_in(&self) {
         match self.timeline.count_in(self.position()) {
-            Some((beats, beat_secs)) => self.send(Cmd::PlayCountIn { beats, beat_secs }),
+            Some((beats, beat_secs)) => {
+                let measures = self.count_in_measures.clamp(1, 4);
+                self.send(Cmd::PlayCountIn { beats: (beats * measures).min(16), beat_secs, delay: self.count_in_delay.clamp(0.0, 30.0) as f64 })
+            }
             None => self.send(Cmd::Play),
         }
     }

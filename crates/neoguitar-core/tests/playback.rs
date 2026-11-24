@@ -260,7 +260,7 @@ fn count_in_and_trainer() {
     shared.mask.store(u64::MAX, Ordering::Relaxed);
     let mut engine = Engine::new(font.clone(), 44100, shared.clone(), rx).unwrap();
     tx.send(Cmd::SetTimeline(tl.clone())).unwrap();
-    tx.send(Cmd::PlayCountIn { beats: 4, beat_secs: 0.5 }).unwrap();
+    tx.send(Cmd::PlayCountIn { beats: 4, beat_secs: 0.5, delay: 0.0 }).unwrap();
     let (mut l, mut r) = (vec![0f32; 512], vec![0f32; 512]);
     let render = |engine: &mut Engine, secs: f64, l: &mut Vec<f32>, r: &mut Vec<f32>| -> f32 {
         let mut peak = 0f32;
@@ -276,6 +276,21 @@ fn count_in_and_trainer() {
     assert!(shared.position() < 0.001, "la canción no debe avanzar durante la cuenta");
     render(&mut engine, 1.0, &mut l, &mut r);
     assert!(shared.position() > 0.2, "después de la cuenta la canción avanza: {}", shared.position());
+
+    // Espera previa: 3 s de silencio antes de los clics, y la canción empieza recién después de ellos.
+    let (tx, rx) = channel();
+    let shared2 = Arc::new(Shared::default());
+    shared2.mask.store(u64::MAX, Ordering::Relaxed);
+    let mut engine2 = Engine::new(font.clone(), 44100, shared2.clone(), rx).unwrap();
+    tx.send(Cmd::SetTimeline(tl.clone())).unwrap();
+    tx.send(Cmd::PlayCountIn { beats: 2, beat_secs: 0.5, delay: 3.0 }).unwrap();
+    let quiet = render(&mut engine2, 2.8, &mut l, &mut r);
+    assert!(quiet < 0.001, "durante la espera no debe sonar nada: {quiet}");
+    let clicks = render(&mut engine2, 1.0, &mut l, &mut r);
+    assert!(clicks > 0.02, "después de la espera suenan los clics");
+    assert!(shared2.position() < 0.001, "la canción sigue sin avanzar");
+    render(&mut engine2, 1.0, &mut l, &mut r);
+    assert!(shared2.position() > 0.1, "y luego arranca la canción: {}", shared2.position());
 
     // Entrenador: un bucle corto sube la velocidad en cada vuelta hasta el máximo.
     let (tx, rx) = channel();

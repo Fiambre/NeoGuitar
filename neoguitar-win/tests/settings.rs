@@ -7,6 +7,8 @@ fn settings_roundtrip() {
     s.speed = 80.0;
     s.metronome = true;
     s.count_in = true;
+    s.count_in_measures = 2;
+    s.count_in_delay = 4.5;
     s.trainer_on = true;
     s.trainer_step = 7;
     s.soundfont = Some("C:/a b/fuente.sf2".into());

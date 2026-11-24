@@ -872,7 +872,8 @@ pub enum Cmd {
     ReplaceTimeline(Arc<Timeline>),
     Play,
     /// Empieza tras `beats` clics separados por `beat_secs` segundos de la canción.
-    PlayCountIn { beats: u32, beat_secs: f64 },
+    /// `delay`: segundos de espera (tiempo real) antes del primer clic, para tener tiempo de prepararse.
+    PlayCountIn { beats: u32, beat_secs: f64, delay: f64 },
     Pause,
     Stop,
     Seek(f64),
@@ -966,6 +967,8 @@ pub struct Engine {
 struct Lead {
     beats: u32,
     beat_secs: f64,
+    /// Espera restante (segundos reales) antes del primer clic.
+    wait: f64,
     elapsed: f64,
     next: u32,
     /// Clic encendido que hay que apagar: (instante, tecla).
@@ -1164,12 +1167,12 @@ impl Engine {
                 self.lead = None;
                 self.playing = true;
             }
-            Cmd::PlayCountIn { beats, beat_secs } => {
+            Cmd::PlayCountIn { beats, beat_secs, delay } => {
                 if self.pos >= self.timeline.total {
                     self.pos = 0.0;
                     self.next = 0;
                 }
-                self.lead = Some(Lead { beats: beats.clamp(1, 16), beat_secs: beat_secs.clamp(0.05, 5.0), elapsed: 0.0, next: 0, off: None });
+                self.lead = Some(Lead { beats: beats.clamp(1, 16), beat_secs: beat_secs.clamp(0.05, 5.0), wait: delay.clamp(0.0, 30.0), elapsed: 0.0, next: 0, off: None });
                 self.playing = true;
             }
             Cmd::Pause => {
@@ -1254,10 +1257,18 @@ impl Engine {
             let chunk = (n - done).min(BLOCK);
             if self.playing && self.lead.is_some() {
                 // Cuenta regresiva: solo suenan los clics; la canción no avanza.
-                let dt = chunk as f64 / self.sample_rate * self.speed;
+                let real = chunk as f64 / self.sample_rate;
+                let dt = real * self.speed;
                 let mut finished = false;
                 if let Some(lead) = self.lead.as_mut() {
-                    lead.elapsed += dt;
+                    if lead.wait > 0.0 {
+                        lead.wait -= real;
+                    } else {
+                        lead.elapsed += dt;
+                    }
+                    if lead.wait > 0.0 {
+                        // Todavía en la espera: silencio.
+                    } else {
                     if let Some((at, key)) = lead.off {
                         if lead.elapsed >= at {
                             self.synth.note_off(9, key);
@@ -1271,6 +1282,7 @@ impl Engine {
                         lead.next += 1;
                     }
                     finished = lead.next >= lead.beats && lead.elapsed >= lead.beats as f64 * lead.beat_secs;
+                    }
                 }
                 if finished {
                     self.lead = None;

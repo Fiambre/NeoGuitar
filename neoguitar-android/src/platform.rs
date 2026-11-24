@@ -11,6 +11,8 @@ pub enum Picked {
     Song(PathBuf),
     SoundFont(PathBuf),
     Lyrics(PathBuf),
+    /// Text typed in the native prompt: (field id, text).
+    Text(i32, String),
     Cancelled,
     Failed(String),
 }
@@ -33,6 +35,15 @@ pub fn pick_file(app: &AndroidApp, kind: i32) {
     with_env(app, |env, act| env.call_method(act, "pickFile", "(I)V", &[kind.into()]).map(|_| ()));
 }
 
+/// Asks for a line of text with a native dialog (and the system keyboard).
+pub fn prompt_text(app: &AndroidApp, id: i32, title: &str, initial: &str) {
+    with_env(app, |env, act| {
+        let title = env.new_string(title)?;
+        let initial = env.new_string(initial)?;
+        env.call_method(act, "promptText", "(ILjava/lang/String;Ljava/lang/String;)V", &[id.into(), (&title).into(), (&initial).into()]).map(|_| ())
+    });
+}
+
 /// The result of the last pick, if one arrived since the previous call.
 pub fn take_picked(app: &AndroidApp) -> Option<Picked> {
     let text = with_env(app, |env, act| {
@@ -44,6 +55,9 @@ pub fn take_picked(app: &AndroidApp) -> Option<Picked> {
         Ok(Some(s))
     })??;
     let (kind, rest) = text.split_once('|')?;
+    if let Some(id) = kind.strip_prefix('t').and_then(|n| n.parse::<i32>().ok()) {
+        return Some(Picked::Text(id, rest.to_string()));
+    }
     Some(match kind {
         "0" => Picked::Song(rest.into()),
         "1" => Picked::SoundFont(rest.into()),

@@ -101,7 +101,9 @@ impl App {
 
         let bundled = bundled_soundfont(&android, &data_dir).map_err(|e| notice = Some(e)).ok();
         let font = settings.soundfont.clone().filter(|p| p.is_file()).or(bundled);
-        let player = Player::new(font);
+        let mut player = Player::new(font);
+        player.count_in_measures = settings.count_in_measures;
+        player.count_in_delay = settings.count_in_delay;
 
         let mut app = App {
             android,
@@ -238,6 +240,8 @@ impl App {
                 }
                 Err(e) => self.lyr_msg = Some(format!("Could not read the file: {e}")),
             },
+            Picked::Text(0, text) => self.lyr_artist = text,
+            Picked::Text(_, text) => self.lyr_title = text,
             Picked::Cancelled => {}
             Picked::Failed(e) => self.notice = Some(e),
         }
@@ -447,8 +451,15 @@ impl App {
             if theme::chip(ui, Icon::Metronome, metronome, "Metronome").clicked() {
                 self.player.set_metronome(!metronome);
             }
-            if theme::chip(ui, Icon::Timer, self.settings.count_in, "Count-in").clicked() {
-                self.settings.count_in = !self.settings.count_in;
+            let count_chip = theme::chip(ui, Icon::Timer, self.settings.count_in, "Count-in");
+            let mut count_changed = false;
+            egui::Popup::menu(&count_chip).show(|ui| {
+                let s = &mut self.settings;
+                count_changed = theme::count_in_controls(ui, &mut s.count_in, &mut s.count_in_measures, &mut s.count_in_delay);
+            });
+            if count_changed {
+                self.player.count_in_measures = self.settings.count_in_measures;
+                self.player.count_in_delay = self.settings.count_in_delay;
                 self.settings.save(&self.data_dir);
             }
             if theme::chip(ui, Icon::Follow, self.follow, "Follow").clicked() {
@@ -599,15 +610,13 @@ impl App {
         }
     }
 
-    /// Text box that raises the on-screen keyboard. `which`: 0 = artist, 1 = title.
-    fn text_field(&mut self, ui: &mut egui::Ui, which: u8) {
-        let text = if which == 0 { &mut self.lyr_artist } else { &mut self.lyr_title };
-        let resp = ui.add(egui::TextEdit::singleline(text).desired_width(ui.available_width()));
-        if resp.gained_focus() {
-            self.android.show_soft_input(true);
-        }
-        if resp.lost_focus() {
-            self.android.hide_soft_input(true);
+    /// A text "box" that opens the system's text prompt when tapped. `which`: 0 = artist, 1 = title.
+    fn text_field(&mut self, ui: &mut egui::Ui, which: i32) {
+        let (value, title) = if which == 0 { (self.lyr_artist.clone(), "Artist") } else { (self.lyr_title.clone(), "Title") };
+        let shown = if value.is_empty() { RichText::new("Tap to write").color(theme::MUTED) } else { RichText::new(value.clone()) };
+        let width = ui.available_width();
+        if ui.add_sized([width, 34.0], egui::Button::new(shown).truncate()).clicked() {
+            platform::prompt_text(&self.android, which, title, &value);
         }
     }
 

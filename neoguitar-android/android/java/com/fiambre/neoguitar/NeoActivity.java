@@ -1,11 +1,16 @@
 package com.fiambre.neoguitar;
 
+import android.app.AlertDialog;
 import android.app.NativeActivity;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Bundle;
 import android.provider.OpenableColumns;
+import android.text.InputType;
+import android.view.WindowManager;
+import android.widget.EditText;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -17,7 +22,8 @@ import java.io.OutputStream;
  * opens the picker, copies the chosen document to private storage (the Rust side reads plain files) and leaves
  * the path for Rust to collect with takePending(). It also accepts files sent to the app ("Open with" / "Share").
  *
- * Result format: "<kind>|<absolute path>", "C|" when the picker was cancelled or "E|<message>" on failure.
+ * Result format: "<kind>|<absolute path>", "C|" when the picker was cancelled, "E|<message>" on failure or
+ * "t<id>|<text>" for promptText().
  * Kinds: 0 = song, 1 = SoundFont, 2 = lyrics.
  */
 public class NeoActivity extends NativeActivity {
@@ -79,6 +85,44 @@ public class NeoActivity extends NativeActivity {
             return;
         }
         copyAsync(data.getData(), pickKind);
+    }
+
+    /**
+     * Native text box. egui's own text fields fight with the Android keyboard (the keyboard flickers), so the
+     * app asks the system for the text instead. The answer arrives as "t<id>|<text>"; cancelling gives "C|".
+     */
+    public void promptText(final int id, final String title, final String initial) {
+        runOnUiThread(new Runnable() {
+            public void run() {
+                final EditText input = new EditText(NeoActivity.this);
+                input.setInputType(InputType.TYPE_CLASS_TEXT);
+                input.setSingleLine(true);
+                input.setText(initial);
+                input.setSelection(input.getText().length());
+                AlertDialog.Builder b = new AlertDialog.Builder(NeoActivity.this);
+                b.setTitle(title);
+                b.setView(input);
+                b.setPositiveButton("OK", new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface d, int which) {
+                        setPending("t" + id + "|" + input.getText().toString());
+                    }
+                });
+                b.setNegativeButton("Cancel", new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface d, int which) {
+                        setPending("C|");
+                    }
+                });
+                b.setOnCancelListener(new DialogInterface.OnCancelListener() {
+                    public void onCancel(DialogInterface d) {
+                        setPending("C|");
+                    }
+                });
+                AlertDialog dialog = b.create();
+                dialog.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE);
+                dialog.show();
+                input.requestFocus();
+            }
+        });
     }
 
     /** Called from Rust: the last result, or null. */
