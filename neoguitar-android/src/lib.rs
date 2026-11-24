@@ -2,6 +2,8 @@
 #![cfg(target_os = "android")]
 
 mod app;
+mod platform;
+mod settings;
 
 use android_activity::AndroidApp;
 

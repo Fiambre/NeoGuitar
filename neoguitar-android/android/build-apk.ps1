@@ -26,6 +26,14 @@ try {
     Copy-Item "$repo\samples\extra\Demo v5.gp5" "$out\assets\demo.gp5"
     Copy-Item $so "$out\lib\$Abi\"
 
+    # The one Java class (file picker): javac -> d8 -> classes.dex
+    New-Item -ItemType Directory -Force "$out\classes" | Out-Null
+    & "$env:JAVA_HOME\bin\javac.exe" --release 8 -Xlint:-options -cp $jar -d "$out\classes" "$PSScriptRoot\java\com\fiambre\neoguitar\NeoActivity.java"
+    if ($LASTEXITCODE -ne 0) { throw "javac failed" }
+    $cls = Get-ChildItem "$out\classes" -Recurse -Filter *.class | ForEach-Object { $_.FullName }
+    & "$bt\d8.bat" --release --min-api $minSdk --lib $jar --output "$out" $cls
+    if ($LASTEXITCODE -ne 0) { throw "d8 failed" }
+
     & "$bt\aapt2.exe" compile --dir "$PSScriptRoot\res" -o "$out\res.zip"
     if ($LASTEXITCODE -ne 0) { throw "aapt2 compile failed" }
     & "$bt\aapt2.exe" link -o "$out\base.apk" -I $jar --manifest "$PSScriptRoot\AndroidManifest.xml" -A "$out\assets" "$out\res.zip" `
@@ -35,6 +43,7 @@ try {
     # Native libraries go into the APK as-is.
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $zip = [IO.Compression.ZipFile]::Open("$out\base.apk", "Update")
+    [void][IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, "$out\classes.dex", "classes.dex", "Optimal")
     [void][IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, "$out\lib\$Abi\libneoguitar_android.so", "lib/$Abi/libneoguitar_android.so", "Optimal")
     $zip.Dispose()
 
@@ -55,6 +64,6 @@ try {
     if ($Install) {
         & "$sdk\platform-tools\adb.exe" install -r $apk
         if ($LASTEXITCODE -ne 0) { throw "adb install failed" }
-        & "$sdk\platform-tools\adb.exe" shell am start -n com.fiambre.neoguitar/android.app.NativeActivity
+        & "$sdk\platform-tools\adb.exe" shell am start -n com.fiambre.neoguitar/.NeoActivity
     }
 } finally { Pop-Location }

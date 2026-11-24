@@ -16,5 +16,6 @@ neoguitar-ui = { path = "../crates/neoguitar-ui" }
 egui = "0.37.0"
 eframe = { version = "0.37.0", default-features = false, features = ["android-native-activity", "glow", "default_fonts"] }
 android-activity = { version = "0.6", features = ["native-activity"] }
+jni = "0.21"
 android_logger = "0.15"
 log = "0.4"

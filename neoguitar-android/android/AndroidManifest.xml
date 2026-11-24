@@ -2,15 +2,18 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.fiambre.neoguitar">
 
+    <!-- Lyrics are searched on lrclib.net. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <application
         android:label="NeoGuitar"
-        android:hasCode="false"
+        android:hasCode="true"
         android:extractNativeLibs="true"
         android:allowBackup="true"
         android:theme="@style/AppTheme">
 
         <activity
-            android:name="android.app.NativeActivity"
+            android:name="com.fiambre.neoguitar.NeoActivity"
             android:exported="true"
             android:label="NeoGuitar"
             android:launchMode="singleTask"
@@ -20,6 +23,29 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- Open with NeoGuitar: Guitar Pro files from a file manager, a chat or the browser. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="file" />
+                <data android:scheme="content" />
+                <data android:mimeType="*/*" />
+                <data android:pathPattern=".*\\.gp" />
+                <data android:pathPattern=".*\\.gp3" />
+                <data android:pathPattern=".*\\.gp4" />
+                <data android:pathPattern=".*\\.gp5" />
+                <data android:pathPattern=".*\\.gpx" />
+                <data android:pathPattern=".*\\.GP5" />
+                <data android:pathPattern=".*\\.GP4" />
+                <data android:pathPattern=".*\\.GP3" />
+            </intent-filter>
+            <!-- Share to NeoGuitar. -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
             </intent-filter>
         </activity>
     </application>
