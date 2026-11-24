@@ -4,7 +4,7 @@
 //! plica: con dos voces, la primera lleva plica hacia arriba y la segunda hacia abajo.
 
 use eframe::egui::{self, Align2, Color32, FontFamily, FontId, Painter, Pos2, Rect, Stroke, vec2};
-use neoguitar::model::*;
+use neoguitar_core::model::*;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -148,7 +148,7 @@ impl Geometry {
 }
 
 /// Clave y armadura al inicio de un sistema.
-pub use neoguitar::model::transpose_key as transposed_key;
+pub use neoguitar_core::model::transpose_key as transposed_key;
 
 pub fn draw_head(p: &Painter, c: &StaffColors, g: &Geometry, clef: Clef, key: i8, x: f32, x_end: f32) {
     let sp = g.space();

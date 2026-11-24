@@ -1,4 +1,4 @@
-use neoguitar::lyrics::*;
+use neoguitar_core::lyrics::*;
 
 #[test]
 fn parses_lrc_with_tags_and_multiple_stamps() {

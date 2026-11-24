@@ -1,0 +1,11 @@
+[workspace]
+members = ["crates/neoguitar-core", "neoguitar-win"]
+resolver = "3"
+
+[workspace.package]
+edition = "2024"
+license = "LGPL-2.1-or-later"
+
+# Local copy of rustysynth that accepts SoundFonts with empty instruments/presets (see vendor/rustysynth).
+[patch.crates-io]
+rustysynth = { path = "vendor/rustysynth" }

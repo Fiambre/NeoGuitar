@@ -5,10 +5,10 @@ use std::path::Path;
 
 #[test]
 fn matches_pyguitarpro() {
-    let root = env!("CARGO_MANIFEST_DIR");
-    let text = std::fs::read_to_string(format!("{root}/tests/fixtures/pyguitarpro_notes.txt")).unwrap();
+    let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
+    let text = std::fs::read_to_string(format!("{}/tests/fixtures/pyguitarpro_notes.txt", env!("CARGO_MANIFEST_DIR"))).unwrap();
     let (mut files, mut bad) = (std::collections::BTreeSet::new(), Vec::new());
-    let mut cache: Option<(String, neoguitar::model::Song)> = None;
+    let mut cache: Option<(String, neoguitar_core::model::Song)> = None;
     for line in text.lines().filter(|l| !l.starts_with('#') && !l.is_empty()) {
         let mut it = line.split('|');
         let (file, track, counts) = (it.next().unwrap(), it.next().unwrap().parse::<usize>().unwrap(), it.next().unwrap());
@@ -17,7 +17,7 @@ fn matches_pyguitarpro() {
             continue; // muestra no incluida en el repositorio (derechos de autor)
         }
         if cache.as_ref().map(|c| c.0 != file).unwrap_or(true) {
-            match neoguitar::load(Path::new(&format!("{root}/{file}"))) {
+            match neoguitar_core::load(Path::new(&format!("{root}/{file}"))) {
                 Ok(s) => cache = Some((file.to_string(), s)),
                 Err(e) => {
                     bad.push(format!("{file}: no se pudo leer ({e})"));

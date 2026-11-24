@@ -1,0 +1,17 @@
+[package]
+name = "neoguitar-core"
+version = "0.3.0"
+edition.workspace = true
+license.workspace = true
+description = "Guitar Pro (GP3 to GP7) parser, playback engine and lyrics for NeoGuitar; no user interface"
+
+[lib]
+name = "neoguitar_core"
+
+[dependencies]
+cpal = "0.18.2"
+roxmltree = "0.21.2"
+rustysynth = "1.3.8"
+serde_json = "1"
+ureq = "3"
+zip = { version = "9.6.0", default-features = false, features = ["deflate"] }

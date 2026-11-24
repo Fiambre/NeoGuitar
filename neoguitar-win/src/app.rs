@@ -1,11 +1,11 @@
 use crate::theme::{self, Icon, IconStyle};
 use crate::tab_view::{self, ViewAction};
 use eframe::egui::{self, Align, Layout, RichText};
-use neoguitar::audio::{Player, Status};
-use neoguitar::lyrics::{self, Lyrics};
-use neoguitar::model::{midi_note_name, Song};
-use neoguitar::settings::Settings;
-use neoguitar::update::{self, Release};
+use neoguitar_core::audio::{Player, Status};
+use neoguitar_core::lyrics::{self, Lyrics};
+use neoguitar_core::model::{midi_note_name, Song};
+use neoguitar_win::settings::Settings;
+use neoguitar_win::update::{self, Release};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -178,7 +178,7 @@ impl App {
     }
 
     fn open(&mut self, path: &Path) {
-        match neoguitar::load(path) {
+        match neoguitar_core::load(path) {
             Ok(song) => {
                 self.player.stop();
                 self.player.set_song(&song);
@@ -311,7 +311,7 @@ impl App {
     fn export_ascii(&mut self) {
         let Some(song) = &self.song else { return };
         let Some(track) = song.tracks.get(self.track) else { return };
-        let text = neoguitar::ascii::ascii_tab(song, track, 100);
+        let text = neoguitar_core::ascii::ascii_tab(song, track, 100);
         let stem = self.path.as_ref().and_then(|p| p.file_stem()).map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "tab".into());
         let name = format!("{stem} - {}.txt", track.name.trim().replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "_"));
         if let Some(p) = rfd::FileDialog::new().add_filter("Text", &["txt"]).set_file_name(name).save_file() {
@@ -1127,7 +1127,7 @@ impl eframe::App for App {
                 }
                 Some(selected) => {
                     // Vista multipista: las pistas marcadas con el ojo; si no hay ninguna, la seleccionada.
-                    let mut list: Vec<&neoguitar::model::Track> = Vec::new();
+                    let mut list: Vec<&neoguitar_core::model::Track> = Vec::new();
                     if self.multi {
                         for (i, t) in song.tracks.iter().enumerate() {
                             if self.visible.get(i).copied().unwrap_or(false) {
@@ -1204,7 +1204,7 @@ fn unix_now() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
-fn track_label(t: &neoguitar::model::Track) -> String {
+fn track_label(t: &neoguitar_core::model::Track) -> String {
     let name = if t.name.trim().is_empty() { "(unnamed)" } else { t.name.trim() };
     format!("{}. {}", t.number, name)
 }
@@ -1329,7 +1329,7 @@ fn side_info(ui: &mut egui::Ui, song: &Song, path: Option<&Path>, selected: &mut
 }
 
 /// Mezcla de una pista: instrumento, paneo y envío de reverb. Los cambios suenan al instante.
-fn mixer_controls(ui: &mut egui::Ui, i: usize, t: &neoguitar::model::Track, player: &Player) {
+fn mixer_controls(ui: &mut egui::Ui, i: usize, t: &neoguitar_core::model::Track, player: &Player) {
     ui.add_space(2.0);
     ui.separator();
     let (mut pan_o, mut prog_o, mut rev_o) = (player.mix_pan(i), player.mix_program(i), player.mix_reverb(i));
@@ -1339,9 +1339,9 @@ fn mixer_controls(ui: &mut egui::Ui, i: usize, t: &neoguitar::model::Track, play
     if !t.is_percussion {
         let program = prog_o.unwrap_or(t.program.clamp(0, 127) as u8) as usize;
         label(ui, "Instrument");
-        egui::ComboBox::from_id_salt(("instrumento", i)).width(ui.available_width() - 8.0).selected_text(neoguitar::gm::NAMES[program.min(127)]).show_ui(ui, |ui| {
+        egui::ComboBox::from_id_salt(("instrumento", i)).width(ui.available_width() - 8.0).selected_text(neoguitar_core::gm::NAMES[program.min(127)]).show_ui(ui, |ui| {
             egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
-                for (k, name) in neoguitar::gm::NAMES.iter().enumerate() {
+                for (k, name) in neoguitar_core::gm::NAMES.iter().enumerate() {
                     if ui.selectable_label(program == k, format!("{:>3}  {name}", k + 1)).clicked() {
                         prog_o = Some(k as u8);
                         changed = true;
@@ -1367,7 +1367,7 @@ fn mixer_controls(ui: &mut egui::Ui, i: usize, t: &neoguitar::model::Track, play
         changed = true;
     }
 
-    let mut reverb = rev_o.unwrap_or(neoguitar::playback::DEFAULT_REVERB);
+    let mut reverb = rev_o.unwrap_or(neoguitar_core::playback::DEFAULT_REVERB);
     label(ui, "Reverb");
     if ui.add(egui::Slider::new(&mut reverb, 0..=127).custom_formatter(|v, _| format!("{:.0} %", v * 100.0 / 127.0))).changed() {
         rev_o = Some(reverb);
@@ -1426,7 +1426,7 @@ fn save_png(path: &Path, img: &egui::ColorImage) -> Result<(), String> {
 
 /// Acordes distintos de la canción, con su diagrama.
 fn chords_panel(ui: &mut egui::Ui, song: &Song) {
-    let mut chords: Vec<&neoguitar::model::Chord> = Vec::new();
+    let mut chords: Vec<&neoguitar_core::model::Chord> = Vec::new();
     for beat in song.tracks.iter().flat_map(|t| &t.measures).flat_map(|m| &m.beats) {
         if let Some(c) = &beat.chord {
             if !chords.iter().any(|k| k.name == c.name && k.frets == c.frets) {
@@ -1448,7 +1448,7 @@ fn chords_panel(ui: &mut egui::Ui, song: &Song) {
 }
 
 /// Diagrama de acorde: cuerdas verticales, 5 trastes, puntos y marcas de cuerda al aire o muda.
-fn chord_diagram(ui: &mut egui::Ui, chord: &neoguitar::model::Chord) {
+fn chord_diagram(ui: &mut egui::Ui, chord: &neoguitar_core::model::Chord) {
     let size = egui::vec2(58.0, 76.0);
     let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
     let p = ui.painter_at(rect);

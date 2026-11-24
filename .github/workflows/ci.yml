@@ -8,16 +8,11 @@ on:
 jobs:
   test:
     runs-on: windows-latest
-    defaults:
-      run:
-        working-directory: neoguitar-win
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: neoguitar-win
       - name: Build
-        run: cargo build --release
+        run: cargo build --release --workspace
       - name: Test
-        run: cargo test --release
+        run: cargo test --release --workspace

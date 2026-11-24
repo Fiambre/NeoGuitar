@@ -45,7 +45,32 @@ pub fn is_newer(current: &str, latest: &str) -> bool {
     }
 }
 
-/// Interpreta la respuesta de `releases/latest` de la API de GitHub.
+/// ¿El tag es de un release de Windows? Los actuales son `win-vX.Y.Z`; los anteriores a la separación por
+/// plataforma eran `vX.Y.Z`. Los de otras plataformas (`android-v…`) no cuentan.
+fn is_windows_tag(tag: &str) -> bool {
+    let t = tag.strip_prefix("win-").unwrap_or(tag);
+    t.starts_with('v') && parse_version(t).is_some()
+}
+
+/// Elige, de la lista de releases del repositorio, el más nuevo de Windows (ignora borradores y prerelease).
+pub fn parse_windows_releases(json: &str) -> Result<Option<Release>, String> {
+    let v: serde_json::Value = serde_json::from_str(json).map_err(|e| format!("bad response: {e}"))?;
+    let list = v.as_array().ok_or("bad response: expected a list of releases")?;
+    let mut best: Option<((u32, u32, u32), &serde_json::Value)> = None;
+    for item in list {
+        if item["draft"].as_bool() == Some(true) || item["prerelease"].as_bool() == Some(true) {
+            continue;
+        }
+        let Some(tag) = item["tag_name"].as_str().filter(|t| is_windows_tag(t)) else { continue };
+        let Some(ver) = parse_version(tag.strip_prefix("win-").unwrap_or(tag)) else { continue };
+        if best.is_none_or(|(b, _)| ver > b) {
+            best = Some((ver, item));
+        }
+    }
+    best.map(|(_, item)| parse_release(&item.to_string())).transpose()
+}
+
+/// Interpreta un release (objeto) de la API de GitHub.
 pub fn parse_release(json: &str) -> Result<Release, String> {
     let v: serde_json::Value = serde_json::from_str(json).map_err(|e| format!("bad response: {e}"))?;
     let tag = v["tag_name"].as_str().ok_or("the release has no tag")?;
@@ -61,7 +86,7 @@ pub fn parse_release(json: &str) -> Result<Release, String> {
         })
     });
     Ok(Release {
-        version: tag.trim_start_matches('v').to_string(),
+        version: tag.strip_prefix("win-").unwrap_or(tag).trim_start_matches('v').to_string(),
         page: v["html_url"].as_str().unwrap_or("https://github.com/Fiambre/NeoGuitar/releases").to_string(),
         installer,
         notes: v["body"].as_str().unwrap_or("").to_string(),
@@ -72,9 +97,9 @@ fn agent(timeout: Duration) -> ureq::Agent {
     ureq::Agent::config_builder().timeout_global(Some(timeout)).build().into()
 }
 
-/// Consulta el último release; `Some` solo si es más nuevo que la versión instalada.
+/// Consulta el último release de Windows; `Some` solo si es más nuevo que la versión instalada.
 pub fn check() -> Result<Option<Release>, String> {
-    let url = format!("https://api.github.com/repos/{REPO}/releases/latest");
+    let url = format!("https://api.github.com/repos/{REPO}/releases?per_page=30");
     let mut resp = agent(Duration::from_secs(12))
         .get(&url)
         .header("User-Agent", USER_AGENT)
@@ -82,7 +107,7 @@ pub fn check() -> Result<Option<Release>, String> {
         .call()
         .map_err(|e| format!("could not check for updates: {e}"))?;
     let body = resp.body_mut().read_to_string().map_err(|e| format!("bad response: {e}"))?;
-    let release = parse_release(&body)?;
+    let Some(release) = parse_windows_releases(&body)? else { return Ok(None) };
     // NEOGUITAR_CURRENT_VERSION permite probar el aviso sin publicar una versión nueva.
     let current = std::env::var("NEOGUITAR_CURRENT_VERSION").unwrap_or_else(|_| env!("CARGO_PKG_VERSION").to_string());
     Ok(is_newer(&current, &release.version).then_some(release))

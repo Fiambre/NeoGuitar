@@ -2,7 +2,7 @@
 
 use crate::theme;
 use eframe::egui::{self, Align2, Color32, FontId, Pos2, Rect, Sense, Stroke, Ui, vec2};
-use neoguitar::model::{midi_note_name, Track};
+use neoguitar_core::model::{midi_note_name, Track};
 
 const FRETS: usize = 24;
 /// Marcas del mástil: trastes con un punto, y el 12 y el 24 con dos.

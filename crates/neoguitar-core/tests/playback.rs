@@ -1,18 +1,18 @@
-use neoguitar::model::*;
-use neoguitar::playback::*;
+use neoguitar_core::model::*;
+use neoguitar_core::playback::*;
 use rustysynth::SoundFont;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::channel;
 use std::sync::Arc;
 
 fn load(name: &str) -> Song {
-    neoguitar::load(format!("{}/samples/{name}", env!("CARGO_MANIFEST_DIR"))).unwrap()
+    neoguitar_core::load(format!("{}/samples/{name}", concat!(env!("CARGO_MANIFEST_DIR"), "/../.."))).unwrap()
 }
 
 /// Carga una muestra; si no está (no se publican las tablaturas de terceros), el test se omite.
 macro_rules! load_or_skip {
     ($name:expr) => {{
-        let path = format!("{}/samples/{}", env!("CARGO_MANIFEST_DIR"), $name);
+        let path = format!("{}/samples/{}", concat!(env!("CARGO_MANIFEST_DIR"), "/../.."), $name);
         if !std::path::Path::new(&path).exists() {
             eprintln!("sin la muestra {}, se omite", $name);
             return;
@@ -54,7 +54,7 @@ fn repeat_order() {
 #[test]
 fn timeline_samples() {
     for f in ["nirvana-aneurysm.gp3", "nirvana-breed_9.gp5", "sabotage-22077.gpx", "Metallica - Nothing Else Matters (ver 6).gp"] {
-        if !std::path::Path::new(&format!("{}/samples/{f}", env!("CARGO_MANIFEST_DIR"))).exists() {
+        if !std::path::Path::new(&format!("{}/samples/{f}", concat!(env!("CARGO_MANIFEST_DIR"), "/../.."))).exists() {
             eprintln!("sin la muestra {f}, se omite");
             continue;
         }
@@ -73,7 +73,7 @@ fn timeline_samples() {
 
 #[test]
 fn render_offline() {
-    let sf = format!("{}/soundfonts/GeneralUser-GS.sf2", env!("CARGO_MANIFEST_DIR"));
+    let sf = format!("{}/soundfonts/GeneralUser-GS.sf2", concat!(env!("CARGO_MANIFEST_DIR"), "/../.."));
     let Ok(mut file) = std::fs::File::open(&sf) else {
         eprintln!("sin SoundFont, se omite");
         return;
@@ -108,7 +108,7 @@ fn render_offline() {
     assert!(shared.position() > 15.0);
 
     // Se guarda un WAV para escucharlo.
-    let path = format!("{}/target/breed-render.wav", env!("CARGO_MANIFEST_DIR"));
+    let path = format!("{}/target/breed-render.wav", concat!(env!("CARGO_MANIFEST_DIR"), "/../.."));
     let mut wav = Vec::new();
     let data_len = (pcm.len() * 2) as u32;
     wav.extend_from_slice(b"RIFF");
@@ -156,7 +156,7 @@ fn expressive_events() {
     assert_eq!(&midi[14..18], b"MTrk");
     let len = u32::from_be_bytes([midi[18], midi[19], midi[20], midi[21]]) as usize;
     assert_eq!(midi.len(), 22 + len);
-    std::fs::write(format!("{}/target/nothing-else-matters.mid", env!("CARGO_MANIFEST_DIR")), &midi).unwrap();
+    std::fs::write(format!("{}/target/nothing-else-matters.mid", concat!(env!("CARGO_MANIFEST_DIR"), "/../..")), &midi).unwrap();
 }
 
 #[test]
@@ -189,7 +189,7 @@ fn swing_changes_timing() {
 
 /// Renderiza `seconds` desde el compás `measure` (base 1) y guarda un WAV; devuelve el pico.
 fn render_wav(song: &Song, measure: usize, seconds: usize, name: &str) -> Option<f32> {
-    let sf = format!("{}/soundfonts/GeneralUser-GS.sf2", env!("CARGO_MANIFEST_DIR"));
+    let sf = format!("{}/soundfonts/GeneralUser-GS.sf2", concat!(env!("CARGO_MANIFEST_DIR"), "/../.."));
     let mut file = std::fs::File::open(&sf).ok()?;
     let font = Arc::new(SoundFont::new(&mut file).unwrap());
     let tl = Arc::new(Timeline::build(song));
@@ -228,7 +228,7 @@ fn render_wav(song: &Song, measure: usize, seconds: usize, name: &str) -> Option
     for s in &pcm {
         wav.extend_from_slice(&s.to_le_bytes());
     }
-    std::fs::write(format!("{}/target/{name}", env!("CARGO_MANIFEST_DIR")), wav).unwrap();
+    std::fs::write(format!("{}/target/{name}", concat!(env!("CARGO_MANIFEST_DIR"), "/../..")), wav).unwrap();
     Some(peak)
 }
 
@@ -245,7 +245,7 @@ fn render_guitar_solo() {
 
 #[test]
 fn count_in_and_trainer() {
-    let sf = format!("{}/soundfonts/GeneralUser-GS.sf2", env!("CARGO_MANIFEST_DIR"));
+    let sf = format!("{}/soundfonts/GeneralUser-GS.sf2", concat!(env!("CARGO_MANIFEST_DIR"), "/../.."));
     let Ok(mut file) = std::fs::File::open(&sf) else {
         eprintln!("sin SoundFont, se omite");
         return;
@@ -298,8 +298,8 @@ fn count_in_and_trainer() {
 
 #[test]
 fn export_wav_offline() {
-    use neoguitar::audio::render_wav;
-    let sf = format!("{}/soundfonts/GeneralUser-GS.sf2", env!("CARGO_MANIFEST_DIR"));
+    use neoguitar_core::audio::render_wav;
+    let sf = format!("{}/soundfonts/GeneralUser-GS.sf2", concat!(env!("CARGO_MANIFEST_DIR"), "/../.."));
     let Ok(mut file) = std::fs::File::open(&sf) else {
         eprintln!("sin SoundFont, se omite");
         return;
@@ -307,7 +307,7 @@ fn export_wav_offline() {
     let font = Arc::new(SoundFont::new(&mut file).unwrap());
     let song = load("extra/Demo v5.gp5");
     let tl = Arc::new(Timeline::build(&song));
-    let out = format!("{}/target/export-test.wav", env!("CARGO_MANIFEST_DIR"));
+    let out = format!("{}/target/export-test.wav", concat!(env!("CARGO_MANIFEST_DIR"), "/../.."));
     render_wav(font, tl.clone(), u64::MAX, &[100; 64], false, 1.0, std::path::Path::new(&out)).unwrap();
     let bytes = std::fs::read(&out).unwrap();
     assert_eq!(&bytes[0..4], b"RIFF");
@@ -353,7 +353,7 @@ fn transposition_shifts_pitched_notes_only() {
 
 #[test]
 fn replace_timeline_keeps_position_and_playing() {
-    let sf = format!("{}/soundfonts/GeneralUser-GS.sf2", env!("CARGO_MANIFEST_DIR"));
+    let sf = format!("{}/soundfonts/GeneralUser-GS.sf2", concat!(env!("CARGO_MANIFEST_DIR"), "/../.."));
     let Ok(mut file) = std::fs::File::open(&sf) else {
         eprintln!("sin SoundFont, se omite");
         return;
@@ -385,8 +385,8 @@ fn replace_timeline_keeps_position_and_playing() {
 
 #[test]
 fn live_mix_changes_pan_and_instrument() {
-    use neoguitar::playback::{Event, MIX_FILE};
-    let sf = format!("{}/soundfonts/GeneralUser-GS.sf2", env!("CARGO_MANIFEST_DIR"));
+    use neoguitar_core::playback::{Event, MIX_FILE};
+    let sf = format!("{}/soundfonts/GeneralUser-GS.sf2", concat!(env!("CARGO_MANIFEST_DIR"), "/../.."));
     let Ok(mut file) = std::fs::File::open(&sf) else {
         eprintln!("sin SoundFont, se omite");
         return;
@@ -457,7 +457,7 @@ fn technique_channels_and_strum() {
 
 #[test]
 fn amp_synth_and_tremolo_bar() {
-    let sf = format!("{}/soundfonts/GeneralUser-GS.sf2", env!("CARGO_MANIFEST_DIR"));
+    let sf = format!("{}/soundfonts/GeneralUser-GS.sf2", concat!(env!("CARGO_MANIFEST_DIR"), "/../.."));
     let Ok(mut file) = std::fs::File::open(&sf) else { return };
     let font = Arc::new(SoundFont::new(&mut file).unwrap());
 

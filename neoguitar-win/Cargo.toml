@@ -1,26 +1,28 @@
 [package]
-name = "neoguitar"
+name = "neoguitar-win"
 version = "0.3.0"
-edition = "2024"
-description = "Lector, visor y reproductor de tablaturas Guitar Pro (GP3 a GP7) con interfaz egui"
-license = "LGPL-2.1-or-later"
+edition.workspace = true
+license.workspace = true
+description = "NeoGuitar for Windows: Guitar Pro viewer and player with an egui interface"
 readme = "README.md"
 
+# The executable keeps its historical name (installer, file associations and the updater rely on it).
+[[bin]]
+name = "neoguitar"
+path = "src/main.rs"
+
+[lib]
+name = "neoguitar_win"
+path = "src/lib.rs"
+
 [dependencies]
-cpal = "0.18.2"
+neoguitar-core = { path = "../crates/neoguitar-core" }
 eframe = "0.37.0"
 png = "0.18.1"
 rfd = "0.18.0"
-roxmltree = "0.21.2"
-rustysynth = "1.3.8"
 serde_json = "1"
 sha2 = "0.10"
 ureq = "3"
-zip = { version = "9.6.0", default-features = false, features = ["deflate"] }
 
 [build-dependencies]
 embed-resource = "3.0.12"
-
-# Local copy of rustysynth that accepts SoundFonts with empty instruments/presets (see vendor/rustysynth).
-[patch.crates-io]
-rustysynth = { path = "vendor/rustysynth" }

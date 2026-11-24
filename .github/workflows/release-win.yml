@@ -1,10 +1,12 @@
-name: Release
+name: Release (Windows)
 
-# Pushing a vX.Y.Z tag builds, creates the installer and publishes a GitHub release.
+# Pushing a win-vX.Y.Z tag builds the Windows app, creates the installer and publishes a GitHub release.
 # It can also be run by hand (workflow_dispatch): it produces the files as artifacts without creating a release.
+# The Windows updater looks for the newest win-v* release (or the old v* ones), so other platforms can
+# publish in the same repository under their own prefix (android-v*).
 on:
   push:
-    tags: ["v*"]
+    tags: ["win-v*"]
   workflow_dispatch:
 
 permissions:
@@ -13,29 +15,24 @@ permissions:
 jobs:
   windows:
     runs-on: windows-latest
-    defaults:
-      run:
-        working-directory: neoguitar-win
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: neoguitar-win
 
       - name: Version
         id: ver
         shell: pwsh
         run: |
-          if ("${{ github.ref_type }}" -eq "tag") { $v = "${{ github.ref_name }}".TrimStart("v") }
-          else { $v = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value }
+          if ("${{ github.ref_type }}" -eq "tag") { $v = "${{ github.ref_name }}" -replace '^win-v', '' }
+          else { $v = (Select-String -Path neoguitar-win/Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value }
           "version=$v" >> $env:GITHUB_OUTPUT
 
       - name: Test
-        run: cargo test --release
+        run: cargo test --release --workspace
 
       - name: Build
-        run: cargo build --release
+        run: cargo build --release -p neoguitar-win
 
       - name: Install Inno Setup
         shell: pwsh
@@ -44,6 +41,7 @@ jobs:
 
       - name: Build installer
         shell: pwsh
+        working-directory: neoguitar-win
         run: |
           $iscc = (Get-Command iscc -ErrorAction SilentlyContinue).Source
           if (-not $iscc) { $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
@@ -52,11 +50,12 @@ jobs:
 
       - name: Portable version (zip)
         shell: pwsh
+        working-directory: neoguitar-win
         run: |
           $dir = "dist\NeoGuitar-${{ steps.ver.outputs.version }}-portable"
           New-Item -ItemType Directory -Force $dir | Out-Null
-          Copy-Item target\release\neoguitar.exe, LICENSE, README.md $dir
-          Copy-Item soundfonts $dir -Recurse
+          Copy-Item ..\target\release\neoguitar.exe, ..\LICENSE, README.md $dir
+          Copy-Item ..\soundfonts $dir -Recurse
           Compress-Archive -Path "$dir\*" -DestinationPath "dist\NeoGuitar-${{ steps.ver.outputs.version }}-portable.zip"
           Remove-Item $dir -Recurse
 
@@ -72,6 +71,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
+          # Old installed copies (0.3.0) ask GitHub for the "latest" release, so Windows releases stay marked as latest.
+          make_latest: "true"
           files: |
             neoguitar-win/dist/*-setup.exe
             neoguitar-win/dist/*-portable.zip

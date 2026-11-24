@@ -1,4 +1,4 @@
-use neoguitar::update::*;
+use neoguitar_win::update::*;
 
 #[test]
 fn version_comparison() {
@@ -44,12 +44,31 @@ fn download_refuses_foreign_hosts_and_missing_checksum() {
     assert!(!dest.exists());
 }
 
+#[test]
+fn picks_newest_windows_release_among_platforms() {
+    let json = r#"[
+      {"tag_name":"android-v9.0.0","assets":[]},
+      {"tag_name":"win-v0.4.0","draft":true,"assets":[]},
+      {"tag_name":"win-v0.5.0-beta","prerelease":true,"assets":[]},
+      {"tag_name":"win-v0.4.0","assets":[{"name":"NeoGuitar-0.4.0-setup.exe","size":5,"digest":"sha256:aa","browser_download_url":"https://github.com/Fiambre/NeoGuitar/releases/download/win-v0.4.0/NeoGuitar-0.4.0-setup.exe"}]},
+      {"tag_name":"v0.3.0","assets":[]},
+      {"tag_name":"nightly","assets":[]}]"#;
+    // The draft and the beta are skipped; the Android tag is ignored although its number is higher.
+    let r = parse_windows_releases(json).unwrap().unwrap();
+    assert_eq!(r.version, "0.4.0");
+    assert!(r.installer.is_some());
+    // Legacy tags (before the split by platform) still count.
+    let r = parse_windows_releases(r#"[{"tag_name":"android-v1.0.0"},{"tag_name":"v0.3.0","assets":[]}]"#).unwrap().unwrap();
+    assert_eq!(r.version, "0.3.0");
+    assert!(parse_windows_releases(r#"[{"tag_name":"android-v1.0.0"}]"#).unwrap().is_none());
+}
+
 /// Needs internet: the published release must verify against its own checksum.
 #[test]
 #[ignore]
 fn latest_release_checksum_matches() {
-    let json = ureq::get("https://api.github.com/repos/Fiambre/NeoGuitar/releases/latest").header("User-Agent", "NeoGuitar-test").call().unwrap().body_mut().read_to_string().unwrap();
-    let r = parse_release(&json).unwrap();
+    let json = ureq::get("https://api.github.com/repos/Fiambre/NeoGuitar/releases?per_page=30").header("User-Agent", "NeoGuitar-test").call().unwrap().body_mut().read_to_string().unwrap();
+    let r = parse_windows_releases(&json).unwrap().expect("a Windows release");
     let installer = r.installer.expect("installer asset with digest");
     let dest = installer_path("test-download");
     download(&installer, &dest).expect("download and verify");

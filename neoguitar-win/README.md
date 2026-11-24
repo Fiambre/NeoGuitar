@@ -40,7 +40,7 @@ You can also open a file from the app (Ctrl+O) or drag it onto the window.
 
 ### SoundFont
 
-The repository includes [GeneralUser GS](https://schristiancollins.com/generaluser.php) in `soundfonts/` (license in `soundfonts/LICENSE-GeneralUser-GS.txt`), so audio works out of the box. NeoGuitar looks for a `.sf2` in a `soundfonts/` folder next to the executable or the working directory, or in the `NEOGUITAR_SOUNDFONT` environment variable; you can also pick another one from **More → Choose SoundFont…**.
+The repository includes [GeneralUser GS](https://schristiancollins.com/generaluser.php) in the repository's `soundfonts/` folder (license in `soundfonts/LICENSE-GeneralUser-GS.txt`), so audio works out of the box. NeoGuitar looks for a `.sf2` in a `soundfonts/` folder next to the executable or the working directory, or in the `NEOGUITAR_SOUNDFONT` environment variable; you can also pick another one from **More → Choose SoundFont…**.
 
 ### Shortcuts
 
@@ -59,12 +59,12 @@ The repository includes [GeneralUser GS](https://schristiancollins.com/generalus
 cargo test --release
 ```
 
-`samples/extra/` contains test files from [PyGuitarPro](https://github.com/Perlence/PyGuitarPro), and `tests/reference.rs` compares our parser against that reference implementation (`tests/fixtures/dump_ref.py` regenerates the data).
+`samples/extra/` (at the repository root) contains test files from [PyGuitarPro](https://github.com/Perlence/PyGuitarPro), and `crates/neoguitar-core/tests/reference.rs` compares our parser against that reference implementation (`crates/neoguitar-core/tests/fixtures/dump_ref.py` regenerates the data).
 Song tabs used by some other tests are not included because of copyright; those tests are skipped when the files are missing.
 
 ## Releasing a version
 
-Pushing a `vX.Y.Z` tag triggers the *Release* workflow (`.github/workflows/release.yml`): it runs the tests, builds, creates the installer with [Inno Setup](https://jrsoftware.org/isinfo.php) (`installer/neoguitar.iss`) and a portable zip, and attaches both to a GitHub release. The *CI* workflow builds and tests on every push and pull request.
+Pushing a `win-vX.Y.Z` tag triggers the *Release (Windows)* workflow (`.github/workflows/release-win.yml`): it runs the tests, builds, creates the installer with [Inno Setup](https://jrsoftware.org/isinfo.php) (`installer/neoguitar.iss`) and a portable zip, and attaches both to a GitHub release. The *CI* workflow builds and tests on every push and pull request.
 
 ```
 git tag v0.1.0
@@ -75,7 +75,7 @@ git push origin v0.1.0
 
 NeoGuitar is distributed under **LGPL-2.1 or later** (see `LICENSE`).
 
-- The GP3–GP7 readers (`src/gp.rs`, `src/gpx.rs`) are a Rust adaptation of the code from [TuxGuitar](https://github.com/helge17/tuxguitar) (LGPL).
+- The GP3–GP7 readers (`crates/neoguitar-core/src/gp.rs` and `gpx.rs`) are a Rust adaptation of the code from [TuxGuitar](https://github.com/helge17/tuxguitar) (LGPL).
 - [Bravura](https://github.com/steinbergmedia/bravura) notation font (SIL Open Font License, see `assets/fonts/OFL.txt`).
 - Test files from [PyGuitarPro](https://github.com/Perlence/PyGuitarPro) (LGPL-3.0).
 - [GeneralUser GS](https://schristiancollins.com/generaluser.php) SoundFont by S. Christian Collins (its own license, which allows use and redistribution in software projects).

@@ -1,18 +1,18 @@
-use neoguitar::model::*;
+use neoguitar_core::model::*;
 
 fn has(name: &str) -> bool {
-    std::path::Path::new(&format!("{}/samples/{name}", env!("CARGO_MANIFEST_DIR"))).exists()
+    std::path::Path::new(&format!("{}/samples/{name}", concat!(env!("CARGO_MANIFEST_DIR"), "/../.."))).exists()
 }
 
 fn load(name: &str) -> Song {
-    let path = format!("{}/samples/{name}", env!("CARGO_MANIFEST_DIR"));
-    neoguitar::load(&path).unwrap_or_else(|e| panic!("{name}: {e}"))
+    let path = format!("{}/samples/{name}", concat!(env!("CARGO_MANIFEST_DIR"), "/../.."));
+    neoguitar_core::load(&path).unwrap_or_else(|e| panic!("{name}: {e}"))
 }
 
 /// Carga una muestra; si no está (no se publican las tablaturas de terceros), el test se omite.
 macro_rules! load_or_skip {
     ($name:expr) => {{
-        let path = format!("{}/samples/{}", env!("CARGO_MANIFEST_DIR"), $name);
+        let path = format!("{}/samples/{}", concat!(env!("CARGO_MANIFEST_DIR"), "/../.."), $name);
         if !std::path::Path::new(&path).exists() {
             eprintln!("sin la muestra {}, se omite", $name);
             return;
@@ -115,7 +115,7 @@ fn bend_locations() {
 /// Parsea todos los archivos de `samples/extra` (casos mínimos de GP3/GP4/GP5).
 #[test]
 fn extra_samples() {
-    let dir = format!("{}/samples/extra", env!("CARGO_MANIFEST_DIR"));
+    let dir = format!("{}/samples/extra", concat!(env!("CARGO_MANIFEST_DIR"), "/../.."));
     let mut files: Vec<_> = std::fs::read_dir(&dir)
         .unwrap()
         .filter_map(|e| e.ok().map(|e| e.path()))
@@ -125,7 +125,7 @@ fn extra_samples() {
     let mut failures = Vec::new();
     for f in &files {
         let name = f.file_name().unwrap().to_string_lossy().to_string();
-        match neoguitar::load(f) {
+        match neoguitar_core::load(f) {
             Ok(song) => {
                 let notes: usize = song
                     .tracks
@@ -164,13 +164,13 @@ fn extra_samples() {
 
 #[test]
 fn lyrics_and_chords() {
-    let dir = format!("{}/samples/extra", env!("CARGO_MANIFEST_DIR"));
+    let dir = format!("{}/samples/extra", concat!(env!("CARGO_MANIFEST_DIR"), "/../.."));
     let mut files: Vec<_> = std::fs::read_dir(&dir).unwrap().filter_map(|e| e.ok().map(|e| e.path())).collect();
-    files.push(format!("{}/samples/nirvana-aneurysm.gp3", env!("CARGO_MANIFEST_DIR")).into());
-    files.push(format!("{}/samples/nirvana-breed_9.gp5", env!("CARGO_MANIFEST_DIR")).into());
+    files.push(format!("{}/samples/nirvana-aneurysm.gp3", concat!(env!("CARGO_MANIFEST_DIR"), "/../..")).into());
+    files.push(format!("{}/samples/nirvana-breed_9.gp5", concat!(env!("CARGO_MANIFEST_DIR"), "/../..")).into());
     files.sort();
     for f in files {
-        let Ok(song) = neoguitar::load(&f) else { continue };
+        let Ok(song) = neoguitar_core::load(&f) else { continue };
         let chords = song.tracks.iter().flat_map(|t| &t.measures).flat_map(|m| &m.beats).filter(|b| b.chord.is_some()).count();
         let lyr = song.lyrics.as_ref().map(|l| l.syllables().len()).unwrap_or(0);
         if chords > 0 || lyr > 0 {
@@ -181,7 +181,7 @@ fn lyrics_and_chords() {
 
 #[test]
 fn demo_tracks_debug() {
-    let song = neoguitar::load(format!("{}/samples/extra/Demo v5.gp5", env!("CARGO_MANIFEST_DIR"))).unwrap();
+    let song = neoguitar_core::load(format!("{}/samples/extra/Demo v5.gp5", concat!(env!("CARGO_MANIFEST_DIR"), "/../.."))).unwrap();
     for t in &song.tracks {
         println!("pista {} {:?} perc={} cuerdas={:?} prog={} vol={} pan={}", t.number, t.name, t.is_percussion, t.strings, t.program, t.volume, t.pan);
     }
@@ -192,8 +192,8 @@ fn demo_tracks_debug() {
 
 #[test]
 fn ascii_export() {
-    let song = neoguitar::load(format!("{}/samples/extra/Demo v5.gp5", env!("CARGO_MANIFEST_DIR"))).unwrap();
-    let text = neoguitar::ascii::ascii_tab(&song, &song.tracks[0], 100);
+    let song = neoguitar_core::load(format!("{}/samples/extra/Demo v5.gp5", concat!(env!("CARGO_MANIFEST_DIR"), "/../.."))).unwrap();
+    let text = neoguitar_core::ascii::ascii_tab(&song, &song.tracks[0], 100);
     println!("{}", text.lines().take(14).collect::<Vec<_>>().join("
 "));
     assert!(text.contains("Tuning: E4 B3 G3 D3 A2 E2"));
@@ -203,33 +203,6 @@ fn ascii_export() {
     for chunk in rows.chunks(6).filter(|c| c.len() == 6) {
         assert!(chunk.iter().all(|r| r.chars().count() == chunk[0].chars().count()), "{chunk:?}");
     }
-}
-
-#[test]
-fn settings_roundtrip() {
-    use neoguitar::settings::Settings;
-    let mut s = Settings::default();
-    s.zoom = 1.4;
-    s.show_staff = false;
-    s.speed = 80.0;
-    s.metronome = true;
-    s.count_in = true;
-    s.trainer_on = true;
-    s.trainer_step = 7;
-    s.soundfont = Some("C:/a b/fuente.sf2".into());
-    s.add_recent(std::path::Path::new("C:/x/uno.gp5"));
-    s.add_recent(std::path::Path::new("C:/x/dos.gp5"));
-    s.add_recent(std::path::Path::new("C:/x/uno.gp5")); // sube al frente sin duplicarse
-    let back = Settings::parse(&s.serialize());
-    assert_eq!(back, s);
-    assert_eq!(back.recent.len(), 2);
-    assert_eq!(back.recent[0], std::path::PathBuf::from("C:/x/uno.gp5"));
-    // Valores fuera de rango o basura se ajustan sin fallar.
-    let bad = Settings::parse("zoom=99\nspeed=abc\nbasura\nrecent=\ntrainer_step=0\n");
-    assert_eq!(bad.zoom, 2.0);
-    assert_eq!(bad.speed, 100.0);
-    assert_eq!(bad.trainer_step, 1);
-    assert!(bad.recent.is_empty());
 }
 
 #[test]

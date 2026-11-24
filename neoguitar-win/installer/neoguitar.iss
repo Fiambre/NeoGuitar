@@ -22,7 +22,7 @@ DefaultGroupName=NeoGuitar
 DisableProgramGroupPage=yes
 OutputDir=..\dist
 OutputBaseFilename=NeoGuitar-{#AppVersion}-setup
-LicenseFile=..\LICENSE
+LicenseFile=..\..\LICENSE
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
@@ -43,9 +43,9 @@ Name: "assoc"; Description: "Associate Guitar Pro files (.gp3, .gp4, .gp5, .gpx,
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Shortcuts:"; Flags: unchecked
 
 [Files]
-Source: "..\target\release\{#AppExe}"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\soundfonts\*"; DestDir: "{app}\soundfonts"; Flags: ignoreversion recursesubdirs
-Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\..\target\release\{#AppExe}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\..\soundfonts\*"; DestDir: "{app}\soundfonts"; Flags: ignoreversion recursesubdirs
+Source: "..\..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]

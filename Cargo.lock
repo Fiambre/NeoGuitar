@@ -2080,20 +2080,29 @@ dependencies = [
 ]
 
 [[package]]
-name = "neoguitar"
+name = "neoguitar-core"
 version = "0.3.0"
 dependencies = [
  "cpal",
- "eframe",
- "embed-resource",
- "png",
- "rfd",
  "roxmltree",
  "rustysynth",
  "serde_json",
- "sha2",
  "ureq",
  "zip",
+]
+
+[[package]]
+name = "neoguitar-win"
+version = "0.3.0"
+dependencies = [
+ "eframe",
+ "embed-resource",
+ "neoguitar-core",
+ "png",
+ "rfd",
+ "serde_json",
+ "sha2",
+ "ureq",
 ]
 
 [[package]]

@@ -2,7 +2,7 @@
 
 use eframe::egui::{self, Align2, Color32, FontId, Pos2, Rect, Stroke, Ui, vec2};
 use crate::staff;
-use neoguitar::model::*;
+use neoguitar_core::model::*;
 use std::collections::HashMap;
 
 const STRING_GAP: f32 = 16.0;
