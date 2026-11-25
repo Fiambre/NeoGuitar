@@ -3,6 +3,7 @@
 mod app;
 #[cfg(windows)]
 mod assoc;
+mod tabs_search;
 
 fn main() -> eframe::Result {
     let arg = std::env::args().nth(1);

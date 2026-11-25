@@ -68,6 +68,8 @@ pub struct App {
     update_manual: bool,
     update_dl: Option<std::sync::mpsc::Receiver<Result<PathBuf, String>>>,
     update_msg: Option<String>,
+    /// Ventana del complemento opcional para buscar tabs en internet.
+    tabs: crate::tabs_search::TabsSearch,
 }
 
 /// Letra cargada y sus puntos de sincronización: (tiempo de la letra, tiempo de la tablatura).
@@ -129,6 +131,7 @@ impl App {
             update_manual: false,
             update_dl: None,
             update_msg: None,
+            tabs: Default::default(),
         };
         // Consulta de versión nueva: una vez al día como máximo y nunca en las corridas de captura.
         if (persist || std::env::var_os("NEOGUITAR_CURRENT_VERSION").is_some()) && app.settings.check_updates && unix_now().saturating_sub(app.settings.last_update_check) >= 86_400 {
@@ -741,6 +744,11 @@ impl App {
                         ui.close();
                     }
                     ui.separator();
+                    if ui.button("Find tabs online…").on_hover_text("Optional plugin").clicked() {
+                        self.tabs.show_window();
+                        ui.close();
+                    }
+                    ui.separator();
                     if ui.button("Check for updates now").clicked() {
                         let ctx = ui.ctx().clone();
                         self.start_update_check(&ctx, true);
@@ -976,6 +984,9 @@ impl eframe::App for App {
         }
         self.poll_lyrics(&ctx);
         self.poll_updates(&ctx);
+        if let Some(p) = self.tabs.show(&ctx) {
+            self.open(&p);
+        }
         self.player.sync_speed();
         self.persist_settings();
         if matches!(self.player.status, Status::Loading(_)) {

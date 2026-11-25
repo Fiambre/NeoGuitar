@@ -80,3 +80,7 @@ NeoGuitar is distributed under **LGPL-2.1 or later** (see `LICENSE`).
 - Test files from [PyGuitarPro](https://github.com/Perlence/PyGuitarPro) (LGPL-3.0).
 - [GeneralUser GS](https://schristiancollins.com/generaluser.php) SoundFont by S. Christian Collins (its own license, which allows use and redistribution in software projects).
 - Synthesis with [rustysynth](https://github.com/sinshu/rustysynth), audio with [cpal](https://github.com/RustAudio/cpal).
+
+## Find tabs online (optional plugin)
+
+`More ▸ Find tabs online…` opens a search window. The search and download code is **not** part of NeoGuitar: it is a separate program, [gprotab](https://github.com/Fiambre/GTabs-Downloader), that you install from that window if you want it (a checkbox asks you to confirm). NeoGuitar downloads it from the project's releases, checks its SHA-256 and keeps it in `%APPDATA%\NeoGuitar\plugins`. "Remove plugin" deletes it. Tabs are the work of their authors: use them for your own practice and respect their copyright.
