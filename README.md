@@ -23,7 +23,7 @@ Every platform is released with its own tag prefix, so versions do not collide:
 
 | Platform | Tag | Workflow |
 |---|---|---|
-| Windows | `win-vX.Y.Z` (older releases: `vX.Y.Z`) | `release-win.yml` |
+| Windows | `vX.Y.Z` (`win-vX.Y.Z` is accepted too; v0.3.0 can only read `vX.Y.Z`) | `release-win.yml` |
 
 Releases: https://github.com/Fiambre/NeoGuitar/releases
 

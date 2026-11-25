@@ -1,12 +1,13 @@
 name: Release (Windows)
 
-# Pushing a win-vX.Y.Z tag builds the Windows app, creates the installer and publishes a GitHub release.
+# Pushing a vX.Y.Z tag builds the Windows app, creates the installer and publishes a GitHub release.
+# Windows keeps the classic vX.Y.Z tags on purpose: NeoGuitar 0.3.0 asks GitHub for the "latest" release and
+# can only read tags like v0.4.0 (it would not understand win-v0.4.0 and would never offer the update).
+# win-vX.Y.Z is accepted too. Other platforms use their own prefix (android-v*, tabs-v*) and are never "latest".
 # It can also be run by hand (workflow_dispatch): it produces the files as artifacts without creating a release.
-# The Windows updater looks for the newest win-v* release (or the old v* ones), so other platforms can
-# publish in the same repository under their own prefix (android-v*).
 on:
   push:
-    tags: ["win-v*"]
+    tags: ["v*", "win-v*"]
   workflow_dispatch:
 
 permissions:
@@ -24,7 +25,7 @@ jobs:
         id: ver
         shell: pwsh
         run: |
-          if ("${{ github.ref_type }}" -eq "tag") { $v = "${{ github.ref_name }}" -replace '^win-v', '' }
+          if ("${{ github.ref_type }}" -eq "tag") { $v = "${{ github.ref_name }}" -replace '^(win-)?v', '' }
           else { $v = (Select-String -Path neoguitar-win/Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value }
           "version=$v" >> $env:GITHUB_OUTPUT
 

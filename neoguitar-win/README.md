@@ -64,7 +64,7 @@ Song tabs used by some other tests are not included because of copyright; those 
 
 ## Releasing a version
 
-Pushing a `win-vX.Y.Z` tag triggers the *Release (Windows)* workflow (`.github/workflows/release-win.yml`): it runs the tests, builds, creates the installer with [Inno Setup](https://jrsoftware.org/isinfo.php) (`installer/neoguitar.iss`) and a portable zip, and attaches both to a GitHub release. The *CI* workflow builds and tests on every push and pull request.
+Pushing a `vX.Y.Z` tag triggers the *Release (Windows)* workflow (`.github/workflows/release-win.yml`): it runs the tests, builds, creates the installer with [Inno Setup](https://jrsoftware.org/isinfo.php) (`installer/neoguitar.iss`) and a portable zip, and attaches both to a GitHub release. The *CI* workflow builds and tests on every push and pull request.
 
 ```
 git tag v0.1.0

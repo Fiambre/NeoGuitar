@@ -45,8 +45,8 @@ pub fn is_newer(current: &str, latest: &str) -> bool {
     }
 }
 
-/// ¿El tag es de un release de Windows? Los actuales son `win-vX.Y.Z`; los anteriores a la separación por
-/// plataforma eran `vX.Y.Z`. Los de otras plataformas (`android-v…`) no cuentan.
+/// ¿El tag es de un release de Windows? Son `vX.Y.Z` (los únicos que entiende NeoGuitar 0.3.0, que pide
+/// `releases/latest`) y también se acepta `win-vX.Y.Z`. Los de otras plataformas (`android-v…`) no cuentan.
 fn is_windows_tag(tag: &str) -> bool {
     let t = tag.strip_prefix("win-").unwrap_or(tag);
     t.starts_with('v') && parse_version(t).is_some()
