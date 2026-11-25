@@ -155,13 +155,22 @@ pub fn fetch(artist: &str, title: &str, tab_seconds: f64) -> Result<Option<Lyric
 }
 
 /// Tiempo de la tablatura para cada línea. `anchors` = (tiempo de la letra, tiempo de la tablatura) fijados
-/// por el usuario; entre ellos (y los extremos 0 y fin) la correspondencia es lineal.
-pub fn tab_times(lyrics: &Lyrics, anchors: &[(f64, f64)], tab_total: f64) -> Vec<f64> {
+/// por el usuario; entre ellos la correspondencia es lineal. Con `stretch` la letra se estira para que su
+/// duración coincida con la de la tablatura; sin él (por defecto) los tiempos de la letra se usan tal cual
+/// y solo los puntos fijados los desplazan.
+pub fn tab_times(lyrics: &Lyrics, anchors: &[(f64, f64)], stretch: bool, tab_total: f64) -> Vec<f64> {
     let mut pts: Vec<(f64, f64)> = vec![(0.0, 0.0)];
     let mut user = anchors.to_vec();
     user.sort_by(|a, b| a.0.total_cmp(&b.0));
     pts.extend(user);
-    pts.push((lyrics.duration.max(pts.last().map(|p| p.0).unwrap_or(0.0) + 1.0), tab_total.max(pts.last().map(|p| p.1).unwrap_or(0.0) + 1.0)));
+    let last = pts.last().copied().unwrap_or((0.0, 0.0));
+    if stretch {
+        pts.push((lyrics.duration.max(last.0 + 1.0), tab_total.max(last.1 + 1.0)));
+    } else {
+        // Misma velocidad después del último punto.
+        let span = lyrics.duration.max(last.0 + 1.0) + 3600.0 - last.0;
+        pts.push((last.0 + span, last.1 + span));
+    }
     // Mantiene el orden en ambos ejes para que la correspondencia sea monótona.
     let mut mono: Vec<(f64, f64)> = Vec::with_capacity(pts.len());
     for p in pts {

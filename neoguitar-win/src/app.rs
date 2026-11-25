@@ -76,6 +76,8 @@ pub struct App {
 struct LyricsState {
     data: Lyrics,
     anchors: Vec<(f64, f64)>,
+    /// Estira la letra a la duración de la tablatura (opcional; apagado usa los tiempos de la letra tal cual).
+    stretch: bool,
 }
 
 struct ScreenshotJob {
@@ -165,7 +167,7 @@ impl App {
         }
         if let Some(p) = std::env::var_os("NEOGUITAR_LYRICS") {
             if let Ok(text) = std::fs::read_to_string(&p) {
-                app.lyrics = Some(LyricsState { data: lyrics::from_text(&text, "test file".into()), anchors: Vec::new() });
+                app.lyrics = Some(LyricsState { data: lyrics::from_text(&text, "test file".into()), anchors: Vec::new(), stretch: false });
                 app.show_lyrics = true;
             }
         }
@@ -196,7 +198,7 @@ impl App {
                 self.lyr_last = None;
                 if let (Some(dir), false) = (lyrics_dir(), self.lyr_title.is_empty()) {
                     if let Some(l) = lyrics::cache_load(&dir, &self.lyr_artist, &self.lyr_title) {
-                        self.lyrics = Some(LyricsState { data: l, anchors: Vec::new() });
+                        self.lyrics = Some(LyricsState { data: l, anchors: Vec::new(), stretch: false });
                     }
                 }
                 self.song = Some(song);
@@ -462,7 +464,7 @@ impl App {
                         }
                         self.lyr_msg = None;
                         self.lyr_last = None;
-                        self.lyrics = Some(LyricsState { data: l, anchors: Vec::new() });
+                        self.lyrics = Some(LyricsState { data: l, anchors: Vec::new(), stretch: false });
                     }
                     Ok(None) => self.lyr_msg = Some("No lyrics found. Check the title and artist.".into()),
                     Err(e) => self.lyr_msg = Some(e),
@@ -493,7 +495,7 @@ impl App {
         match std::fs::read_to_string(&path) {
             Ok(text) => {
                 let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-                self.lyrics = Some(LyricsState { data: lyrics::from_text(&text, name), anchors: Vec::new() });
+                self.lyrics = Some(LyricsState { data: lyrics::from_text(&text, name), anchors: Vec::new(), stretch: false });
                 self.lyr_msg = None;
                 self.lyr_last = None;
             }
@@ -528,6 +530,7 @@ impl App {
         } else if let Some(state) = &mut self.lyrics {
             ui.label(RichText::new(&state.data.source).size(11.0).color(theme::MUTED));
             let mut remove = false;
+            ui.checkbox(&mut state.stretch, "Stretch to song length").on_hover_text("Off: lyric times are used as they are. On: they are scaled to the tab's duration");
             ui.horizontal(|ui| {
                 if ui.add_enabled(!state.anchors.is_empty(), egui::Button::new("Reset sync")).on_hover_text("Forget the sync points").clicked() {
                     state.anchors.clear();
@@ -553,7 +556,7 @@ impl App {
         let Some(state) = &self.lyrics else { return };
         ui.add_space(6.0);
         let total = self.player.timeline.total;
-        let times = lyrics::tab_times(&state.data, &state.anchors, total);
+        let times = lyrics::tab_times(&state.data, &state.anchors, state.stretch, total);
         let pos = self.player.position();
         let cur = if self.player.is_playing() || pos > 0.0 { lyrics::current(&state.data, &times, pos) } else { None };
         let changed = cur != self.lyr_last;
@@ -599,7 +602,7 @@ impl App {
         }
         let Some(state) = &self.lyrics else { return };
         let total = self.player.timeline.total;
-        let times = lyrics::tab_times(&state.data, &state.anchors, total);
+        let times = lyrics::tab_times(&state.data, &state.anchors, state.stretch, total);
         let pos = self.player.position();
         let cur = if self.player.is_playing() || pos > 0.0 { lyrics::current(&state.data, &times, pos) } else { None };
         let next = cur.and_then(|c| lyrics::next_line(&state.data, c));

@@ -30,6 +30,8 @@ enum Sheet {
 struct LyricsState {
     data: Lyrics,
     anchors: Vec<(f64, f64)>,
+    /// Stretch the lyrics to the tab's length (optional; off uses the lyric times as they are).
+    stretch: bool,
 }
 
 pub struct App {
@@ -151,7 +153,7 @@ impl App {
         // Lyrics found before are reused without asking the network again.
         if !song.title.trim().is_empty() {
             if let Some(l) = lyrics::cache_load(&self.lyrics_dir(), &song.artist, &song.title) {
-                self.lyrics = Some(LyricsState { data: l, anchors: Vec::new() });
+                self.lyrics = Some(LyricsState { data: l, anchors: Vec::new(), stretch: false });
             }
         }
         self.song = Some(song);
@@ -237,7 +239,7 @@ impl App {
             }
             Picked::Lyrics(path) => match std::fs::read_to_string(&path) {
                 Ok(text) => {
-                    self.lyrics = Some(LyricsState { data: lyrics::from_text(&text, file_name(&path)), anchors: Vec::new() });
+                    self.lyrics = Some(LyricsState { data: lyrics::from_text(&text, file_name(&path)), anchors: Vec::new(), stretch: false });
                     self.lyr_msg = None;
                     self.lyr_last = None;
                 }
@@ -270,7 +272,7 @@ impl App {
                         lyrics::cache_store(&self.lyrics_dir(), &self.lyr_artist, &self.lyr_title, &l);
                         self.lyr_msg = None;
                         self.lyr_last = None;
-                        self.lyrics = Some(LyricsState { data: l, anchors: Vec::new() });
+                        self.lyrics = Some(LyricsState { data: l, anchors: Vec::new(), stretch: false });
                     }
                     Ok(None) => self.lyr_msg = Some("No lyrics found. Check the title and artist.".into()),
                     Err(e) => self.lyr_msg = Some(e),
@@ -299,7 +301,7 @@ impl App {
     /// Tablature time of every lyric line and the line that is sounding now.
     fn lyric_position(&self) -> Option<(Vec<f64>, Option<usize>)> {
         let state = self.lyrics.as_ref()?;
-        let times = lyrics::tab_times(&state.data, &state.anchors, self.player.timeline.total);
+        let times = lyrics::tab_times(&state.data, &state.anchors, state.stretch, self.player.timeline.total);
         let pos = self.player.position();
         let cur = if self.player.is_playing() || pos > 0.0 { lyrics::current(&state.data, &times, pos) } else { None };
         Some((times, cur))
@@ -573,8 +575,13 @@ impl App {
         let Some((times, cur)) = self.lyric_position() else { return };
         let changed = cur != self.lyr_last;
         let (mut seek, mut remove, mut reset, mut pin) = (None, false, false, None);
+        let mut stretch_changed = None;
         if let Some(state) = &self.lyrics {
             ui.label(RichText::new(&state.data.source).size(11.0).color(theme::MUTED));
+            let mut s = state.stretch;
+            if ui.checkbox(&mut s, "Stretch to song length").changed() {
+                stretch_changed = Some(s);
+            }
             ui.horizontal(|ui| {
                 let next = cur.and_then(|c| lyrics::next_line(&state.data, c));
                 if ui.add_enabled(next.is_some(), egui::Button::new("Next line starts now")).clicked() {
@@ -608,6 +615,9 @@ impl App {
             });
         }
         self.lyr_last = cur;
+        if let (Some(s), Some(state)) = (stretch_changed, &mut self.lyrics) {
+            state.stretch = s;
+        }
         if let Some(t) = seek {
             self.player.seek(t.max(0.0));
             self.last_followed = None;

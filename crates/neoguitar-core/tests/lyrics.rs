@@ -20,13 +20,19 @@ fn plain_lyrics_keep_stanza_breaks() {
 fn mapping_scales_to_the_tab_and_follows_anchors() {
     let l = from_text("[00:00.00]a\n[00:20.00]b\n[00:40.00]c\n[01:00.00]d\n", "t".into());
     assert!(l.timed);
-    // Without anchors the lyric timeline is stretched over the tab length.
-    let t = tab_times(&l, &[], 120.0);
+    // By default the lyric times are used as they are.
+    let t = tab_times(&l, &[], false, 120.0);
+    assert!((t[1] - 20.0).abs() < 1e-6 && (t[3] - 60.0).abs() < 1e-6, "{t:?}");
+    // Pins shift them without stretching the rest.
+    let t = tab_times(&l, &[(40.0, 50.0)], false, 120.0);
+    assert!((t[2] - 50.0).abs() < 1e-6 && (t[3] - 70.0).abs() < 1e-6, "{t:?}");
+    // With stretch the lyric timeline is fitted to the tab length.
+    let t = tab_times(&l, &[], true, 120.0);
     assert!(t[0].abs() < 1e-9);
     assert!(t.windows(2).all(|w| w[0] < w[1]));
     assert!(t[3] > t[1] * 2.0);
     // Pin line "c" (40 s in the recording) to 50 s of the tab: it lands there and the order is kept.
-    let t = tab_times(&l, &[(40.0, 50.0)], 120.0);
+    let t = tab_times(&l, &[(40.0, 50.0)], true, 120.0);
     assert!((t[2] - 50.0).abs() < 1e-6, "{t:?}");
     assert!(t.windows(2).all(|w| w[0] <= w[1]));
     // The active line follows the playback time.
