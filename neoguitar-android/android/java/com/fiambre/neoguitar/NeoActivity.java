@@ -125,6 +125,27 @@ public class NeoActivity extends NativeActivity {
         });
     }
 
+    private static final String TABS_PACKAGE = "com.fiambre.neoguitar.tabs";
+
+    /** Called from Rust: is the optional companion app installed? (declared in the manifest's <queries>) */
+    public boolean hasTabsCompanion() {
+        return getPackageManager().getLaunchIntentForPackage(TABS_PACKAGE) != null;
+    }
+
+    /** Called from Rust: opens the companion app. */
+    public void openTabsCompanion() {
+        runOnUiThread(new Runnable() {
+            public void run() {
+                try {
+                    Intent i = getPackageManager().getLaunchIntentForPackage(TABS_PACKAGE);
+                    if (i != null) startActivity(i);
+                } catch (Exception e) {
+                    setPending("E|" + e);
+                }
+            }
+        });
+    }
+
     /** Called from Rust: the last result, or null. */
     public synchronized String takePending() {
         String p = pending;

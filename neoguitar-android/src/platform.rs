@@ -44,6 +44,16 @@ pub fn prompt_text(app: &AndroidApp, id: i32, title: &str, initial: &str) {
     });
 }
 
+/// Is the optional "NeoGuitar Tabs" companion app installed?
+pub fn tabs_companion_installed(app: &AndroidApp) -> bool {
+    with_env(app, |env, act| env.call_method(act, "hasTabsCompanion", "()Z", &[])?.z()).unwrap_or(false)
+}
+
+/// Starts the companion app (it hands the downloaded file back to NeoGuitar).
+pub fn open_tabs_companion(app: &AndroidApp) {
+    with_env(app, |env, act| env.call_method(act, "openTabsCompanion", "()V", &[]).map(|_| ()));
+}
+
 /// The result of the last pick, if one arrived since the previous call.
 pub fn take_picked(app: &AndroidApp) -> Option<Picked> {
     let text = with_env(app, |env, act| {

@@ -1,0 +1,17 @@
+[package]
+name = "neoguitar-tabs-android"
+version = "0.1.0"
+edition.workspace = true
+license = "MIT"
+description = "NeoGuitar Tabs: optional Android companion that searches and downloads Guitar Pro tabs (gprotab) and hands them to NeoGuitar"
+publish = false
+
+[lib]
+name = "neoguitar_tabs"
+crate-type = ["cdylib"]
+
+# Android only: on a desktop `cargo build --workspace` this crate is an empty library.
+[target.'cfg(target_os = "android")'.dependencies]
+gprotab = { git = "https://github.com/Fiambre/GTabs-Downloader", rev = "d0568015ca8a00565179f30db885c8c19e6bc13f", features = ["plugin"] }
+jni = "0.21"
+tokio = { version = "1", features = ["rt", "time"] }

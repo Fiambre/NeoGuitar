@@ -1,0 +1,73 @@
+name: Release (NeoGuitar Tabs, Android)
+
+# Pushing a tabs-vX.Y.Z tag builds the optional "NeoGuitar Tabs" companion APK (search and download tabs, hand
+# them to NeoGuitar) and publishes it in a GitHub release. It is NOT part of the Google Play app and is never
+# marked "latest". The version must match neoguitar-tabs-android/Cargo.toml.
+# Uses the same repository secrets as the Android release: ANDROID_KEYSTORE_BASE64 / ANDROID_KEYSTORE_PASSWORD.
+on:
+  push:
+    tags: ["tabs-v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  tabs:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Version
+        id: ver
+        shell: pwsh
+        run: |
+          $cargo = (Select-String -Path neoguitar-tabs-android/Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
+          if ("${{ github.ref_type }}" -eq "tag") {
+            $tag = "${{ github.ref_name }}" -replace '^tabs-v', ''
+            if ($tag -ne $cargo) { throw "Tag version $tag does not match neoguitar-tabs-android/Cargo.toml ($cargo)" }
+          }
+          $p = $cargo.Split('.')
+          "version=$cargo" >> $env:GITHUB_OUTPUT
+          "code=$([int]$p[0] * 1000000 + [int]$p[1] * 1000 + [int]$p[2])" >> $env:GITHUB_OUTPUT
+
+      - name: Android SDK pieces
+        shell: pwsh
+        run: |
+          $sdk = $env:ANDROID_HOME
+          $sm = (Get-ChildItem "$sdk\cmdline-tools" -Recurse -Filter sdkmanager.bat | Select-Object -First 1).FullName
+          "y`ny`ny`ny`ny`n" | & $sm --licenses | Out-Null
+          & $sm "platforms;android-36" "build-tools;36.0.0" "ndk;27.2.12479018"
+          if ($LASTEXITCODE -ne 0) { throw "sdkmanager failed" }
+          "ANDROID_NDK_HOME=$sdk\ndk\27.2.12479018" >> $env:GITHUB_ENV
+          cargo install cargo-ndk --locked
+
+      - name: Build and sign
+        shell: pwsh
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          NEOGUITAR_KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          if (-not $env:KEYSTORE_B64 -or -not $env:NEOGUITAR_KS_PASS) { throw "Missing ANDROID_KEYSTORE_BASE64 / ANDROID_KEYSTORE_PASSWORD secrets" }
+          $ks = "$env:RUNNER_TEMP\upload.jks"
+          [IO.File]::WriteAllBytes($ks, [Convert]::FromBase64String($env:KEYSTORE_B64))
+          ./neoguitar-tabs-android/android/build-apk.ps1 -Keystore $ks -VersionCode ${{ steps.ver.outputs.code }}
+          Remove-Item $ks
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: neoguitar-tabs-${{ steps.ver.outputs.version }}
+          path: target/android-tabs/NeoGuitar-Tabs-${{ steps.ver.outputs.version }}.apk
+
+      - name: Publish release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          name: NeoGuitar Tabs ${{ steps.ver.outputs.version }} (optional Android companion)
+          make_latest: "false"
+          generate_release_notes: true
+          files: target/android-tabs/NeoGuitar-Tabs-${{ steps.ver.outputs.version }}.apk

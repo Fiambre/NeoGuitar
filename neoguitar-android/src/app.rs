@@ -52,6 +52,8 @@ pub struct App {
     lyr_title: String,
     lyr_job: Option<Receiver<Result<Option<Lyrics>, String>>>,
     lyr_msg: Option<String>,
+    /// Is the optional "NeoGuitar Tabs" companion app installed? (checked when the open menu is tapped)
+    tabs_companion: bool,
     lyr_last: Option<usize>,
 }
 
@@ -124,6 +126,7 @@ impl App {
             lyr_title: String::new(),
             lyr_job: None,
             lyr_msg: None,
+            tabs_companion: false,
             lyr_last: None,
         };
         // A file sent to the app wins over the last song; the demo is the fallback.
@@ -320,10 +323,20 @@ impl App {
             let recent = self.settings.recent.clone();
             let mut to_open = None;
             let mut browse = false;
+            let mut find_tabs = false;
+            if open.clicked() {
+                self.tabs_companion = platform::tabs_companion_installed(&self.android);
+            }
+            let companion = self.tabs_companion;
             egui::Popup::menu(&open).show(|ui| {
                 ui.set_min_width(260.0);
                 if ui.button("Open a file…").clicked() {
                     browse = true;
+                    ui.close();
+                }
+                // Only offered when the separate companion app is already installed.
+                if companion && ui.button("Find tabs online…").clicked() {
+                    find_tabs = true;
                     ui.close();
                 }
                 if !recent.is_empty() {
@@ -344,6 +357,9 @@ impl App {
             });
             if browse {
                 self.pick(0, "Opening…");
+            }
+            if find_tabs {
+                platform::open_tabs_companion(&self.android);
             }
             if let Some(p) = to_open {
                 if p.as_os_str().is_empty() {

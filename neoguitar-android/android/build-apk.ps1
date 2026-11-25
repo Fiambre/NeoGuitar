@@ -35,7 +35,7 @@ try {
 
     # The one Java class (file picker): javac -> d8 -> classes.dex
     New-Item -ItemType Directory -Force "$out\classes" | Out-Null
-    & "$env:JAVA_HOME\bin\javac.exe" --release 8 -Xlint:-options -cp $jar -d "$out\classes" "$PSScriptRoot\java\com\fiambre\neoguitar\NeoActivity.java"
+    & "$env:JAVA_HOME\bin\javac.exe" -encoding UTF-8 --release 8 -Xlint:-options -cp $jar -d "$out\classes" "$PSScriptRoot\java\com\fiambre\neoguitar\NeoActivity.java"
     if ($LASTEXITCODE -ne 0) { throw "javac failed" }
     $cls = Get-ChildItem "$out\classes" -Recurse -Filter *.class | ForEach-Object { $_.FullName }
     & "$bt\d8.bat" --release --min-api $minSdk --lib $jar --output "$out" $cls

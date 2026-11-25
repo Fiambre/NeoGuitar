@@ -5,6 +5,11 @@
     <!-- Lyrics are searched on lrclib.net. -->
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- Lets the app know whether the optional companion is installed (shows its menu entry only then). -->
+    <queries>
+        <package android:name="com.fiambre.neoguitar.tabs" />
+    </queries>
+
     <application
         android:label="NeoGuitar"
         android:hasCode="true"

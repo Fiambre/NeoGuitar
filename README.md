@@ -33,3 +33,7 @@ Releases: https://github.com/Fiambre/NeoGuitar/releases
 cargo build --release --workspace
 cargo test --release --workspace
 ```
+## Optional tabs search (not in the store app)
+
+- **Windows:** `More ▸ Find tabs online…` installs and uses the [gprotab](https://github.com/Fiambre/GTabs-Downloader) plugin (a separate program, checked by SHA-256).
+- **Android:** `neoguitar-tabs-android` is a separate companion app, **NeoGuitar Tabs** (release tag `tabs-vX.Y.Z`, APK on GitHub only). NeoGuitar shows `Find tabs online…` in its open menu only when the companion is installed; the Play Store build contains no link to it.
