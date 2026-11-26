@@ -40,6 +40,8 @@ pub struct Settings {
     pub audio_offset_ms: i32,
     /// Última playlist de ensayo abierta.
     pub playlist: Option<PathBuf>,
+    /// Barra de playlist activada.
+    pub playlist_on: bool,
     pub recent: Vec<PathBuf>,
 }
 
@@ -69,6 +71,7 @@ impl Default for Settings {
             audio_click_channel: 0,
             audio_offset_ms: 0,
             playlist: None,
+            playlist_on: false,
             recent: Vec::new(),
         }
     }
@@ -108,6 +111,7 @@ impl Settings {
                 "trainer_max" => s.trainer_max = value.parse::<u32>().map(|v| v.clamp(30, 150)).unwrap_or(s.trainer_max),
                 "check_updates" => s.check_updates = parse_bool(value).unwrap_or(s.check_updates),
                 "last_update_check" => s.last_update_check = value.parse().unwrap_or(0),
+                "playlist_on" => s.playlist_on = parse_bool(value).unwrap_or(false),
                 "playlist" if !value.is_empty() => s.playlist = Some(PathBuf::from(value)),
                 "audio_main" if !value.is_empty() => s.audio_main = Some(value.to_string()),
                 "audio_click" if !value.is_empty() => s.audio_click = Some(value.to_string()),
@@ -141,6 +145,7 @@ impl Settings {
         out.push_str(&format!("check_updates={}
 last_update_check={}
 ", b(self.check_updates), self.last_update_check));
+        out.push_str(&format!("playlist_on={}\n", b(self.playlist_on)));
         if let Some(p) = &self.playlist {
             out.push_str(&format!("playlist={}\n", p.display()));
         }
