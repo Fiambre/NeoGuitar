@@ -78,6 +78,9 @@ pub struct App {
     /// Playlist de ensayo: cada tab con su propia configuración.
     playlist: Playlist,
     playlist_path: Option<PathBuf>,
+    /// Para pasar solo a la siguiente tab: ¿sonaba el cuadro anterior? y última posición vista.
+    adv_was_playing: bool,
+    adv_last_pos: f64,
     /// Panel lateral de la playlist visible.
     playlist_on: bool,
     /// Elemento de la playlist que está cargado.
@@ -153,6 +156,8 @@ impl App {
             playlist: Playlist::default(),
             playlist_path: None,
             playlist_on: false,
+            adv_was_playing: false,
+            adv_last_pos: 0.0,
             playlist_at: None,
             playlist_msg: None,
         };
@@ -212,6 +217,9 @@ impl App {
             if let Ok(pl) = Playlist::load(Path::new(&p)) {
                 app.playlist = pl;
                 app.playlist_on = true;
+                if let Some(p) = &app.path {
+                    app.playlist_at = app.playlist.entries.iter().position(|e| same_file(&e.path, p));
+                }
             }
         }
         if let Some(t) = std::env::var("NEOGUITAR_SPLIT").ok().and_then(|v| v.parse::<usize>().ok()) {
@@ -247,6 +255,8 @@ impl App {
                 self.song = Some(song);
                 self.path = Some(path.to_path_buf());
                 self.settings.add_recent(path);
+                // Si la tab está en la playlist, queda marcada como la actual.
+                self.playlist_at = self.playlist.entries.iter().position(|e| same_file(&e.path, path));
                 self.error = None;
                 self.track = 0;
                 self.last_followed = None;
@@ -354,6 +364,29 @@ impl App {
         }
     }
 
+    /// Con la playlist activa, al terminar una tab pasa a la siguiente y la reproduce (con su cuenta previa si
+    /// la tiene activada). Un bucle activo no termina nunca, y pausar o detener a mitad de tema no avanza.
+    fn playlist_autoadvance(&mut self) {
+        let playing = self.player.is_playing();
+        let total = self.player.timeline.total;
+        let ended = self.adv_was_playing && !playing && total > 0.0 && self.adv_last_pos >= total - 1.0;
+        self.adv_was_playing = playing;
+        if playing {
+            self.adv_last_pos = self.player.position();
+            return;
+        }
+        if !ended || !self.playlist_on {
+            return;
+        }
+        if let Some(i) = self.playlist_at.filter(|&i| i + 1 < self.playlist.entries.len()) {
+            self.play_entry(i + 1);
+            if self.playlist_at == Some(i + 1) {
+                self.toggle_play();
+            }
+        }
+        self.adv_last_pos = 0.0;
+    }
+
     fn save_playlist(&mut self) {
         let Some(p) = self.playlist_path.clone() else { return };
         self.playlist_msg = self.playlist.save(&p).err();
@@ -405,7 +438,7 @@ impl App {
         egui::ScrollArea::vertical().auto_shrink([false, false]).max_height((ui.available_height() - footer).max(60.0)).show(ui, |ui| {
             for i in 0..n {
                 let current = self.playlist_at == Some(i);
-                let same_song = self.path.as_deref() == Some(self.playlist.entries[i].path.as_path());
+                let same_song = self.path.as_deref().is_some_and(|p| same_file(p, &self.playlist.entries[i].path));
                 let fill = if current { theme::ACCENT_DIM } else { theme::CARD };
                 egui::Frame::new().fill(fill).corner_radius(8).inner_margin(egui::Margin::symmetric(10, 8)).show(ui, |ui| {
                     ui.set_width(ui.available_width());
@@ -1345,6 +1378,11 @@ impl eframe::App for App {
             self.open(&p);
         }
         self.audio_window(&ctx);
+        self.playlist_autoadvance();
+        // Al terminar la reproducción no llega ningún evento: se vuelve a mirar pronto para poder avanzar.
+        if self.playlist_on && self.adv_was_playing {
+            ctx.request_repaint_after(Duration::from_millis(100));
+        }
         self.player.sync_speed();
         self.persist_settings();
         if matches!(self.player.status, Status::Loading(_)) {
@@ -1869,4 +1907,9 @@ fn chord_diagram(ui: &mut egui::Ui, chord: &neoguitar_core::model::Chord) {
             p.circle_filled(egui::pos2(x, top + fret_h * (row + 0.5)), 3.2, fg);
         }
     }
+}
+
+/// ¿Las dos rutas son el mismo archivo? (relativa o absoluta, con una u otra barra).
+fn same_file(a: &Path, b: &Path) -> bool {
+    a == b || matches!((a.canonicalize(), b.canonicalize()), (Ok(x), Ok(y)) if x == y)
 }
