@@ -14,9 +14,11 @@ A **Guitar Pro** tab reader, viewer and player written in Rust, with a UI built 
 - **Track mixer:** instrument (all 128 General MIDI sounds), pan and reverb per track, applied live.
 - **Virtual fretboard:** shows the sounding notes on the guitar neck.
 - **Sections:** jump to Intro, Verse, Chorus… from the markers stored in the file.
-- **Lyrics:** search [LRCLIB](https://lrclib.net) (only when you press the button: it sends the title and artist) or load an `.lrc` / `.txt` file. The current line is highlighted and follows the playback; the lyric times are stretched over the tab and you can pin any line to the playback position (right-click) to resync it. Shown in a side panel, or as a strip under the score in split view.
+- **Lyrics:** search [LRCLIB](https://lrclib.net) (only when you press the button: it sends the title and artist) or load an `.lrc` / `.txt` file. The current line is highlighted and follows the playback; the lyric times are used as they are (tick “Stretch to song length” to scale them to the tab) and you can pin any line to the playback position (right-click) to resync it. Shown in a side panel, or as a strip under the score in split view.
 - **Multi-track view:** several tracks stacked in the same system.
 - **Split view:** two tracks side by side (e.g. guitar and bass), each with its own selector. **Full screen** (F11) hides the toolbar and side panel.
+- **Rehearsal playlist** (button in the toolbar, sidebar on the right): a list of tabs, each remembering which tracks play, their volumes, speed, metronome, count-in, loop and transposition. Add tabs from disk or the open tab, reorder them, and it moves on to the next tab by itself when one ends. Saved as a `.ngpl` text file you can copy to another PC together with the tabs.
+- **Audio output** (More menu): choose the output device and a separate one for the metronome and count-in only, e.g. monitor headphones for the players, with the channel pair and a sync offset.
 - **Export:** audio (WAV), MIDI and plain-text tab.
 - Persistent settings (zoom, speed, recent files, SoundFont…).
 
