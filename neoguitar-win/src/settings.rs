@@ -31,6 +31,13 @@ pub struct Settings {
     pub check_updates: bool,
     /// Última consulta (segundos Unix).
     pub last_update_check: u64,
+    /// Dispositivo de salida de la banda (nombre); vacío = el predeterminado de Windows.
+    pub audio_main: Option<String>,
+    /// Dispositivo solo para el metrónomo (p. ej. monitores); vacío = mezclado con la banda.
+    pub audio_click: Option<String>,
+    /// Primer canal (base 0) del par del metrónomo y ajuste de sincronía en ms.
+    pub audio_click_channel: u32,
+    pub audio_offset_ms: i32,
     pub recent: Vec<PathBuf>,
 }
 
@@ -55,6 +62,10 @@ impl Default for Settings {
             trainer_max: 100,
             check_updates: true,
             last_update_check: 0,
+            audio_main: None,
+            audio_click: None,
+            audio_click_channel: 0,
+            audio_offset_ms: 0,
             recent: Vec::new(),
         }
     }
@@ -94,6 +105,10 @@ impl Settings {
                 "trainer_max" => s.trainer_max = value.parse::<u32>().map(|v| v.clamp(30, 150)).unwrap_or(s.trainer_max),
                 "check_updates" => s.check_updates = parse_bool(value).unwrap_or(s.check_updates),
                 "last_update_check" => s.last_update_check = value.parse().unwrap_or(0),
+                "audio_main" if !value.is_empty() => s.audio_main = Some(value.to_string()),
+                "audio_click" if !value.is_empty() => s.audio_click = Some(value.to_string()),
+                "audio_click_channel" => s.audio_click_channel = value.parse::<u32>().map(|v| v.min(31)).unwrap_or(0),
+                "audio_offset_ms" => s.audio_offset_ms = value.parse::<i32>().map(|v| v.clamp(-300, 300)).unwrap_or(0),
                 "recent" if !value.is_empty() => {
                     let p = PathBuf::from(value);
                     if !s.recent.contains(&p) && s.recent.len() < MAX_RECENT {
@@ -122,6 +137,13 @@ impl Settings {
         out.push_str(&format!("check_updates={}
 last_update_check={}
 ", b(self.check_updates), self.last_update_check));
+        if let Some(d) = &self.audio_main {
+            out.push_str(&format!("audio_main={d}\n"));
+        }
+        if let Some(d) = &self.audio_click {
+            out.push_str(&format!("audio_click={d}\n"));
+        }
+        out.push_str(&format!("audio_click_channel={}\naudio_offset_ms={}\n", self.audio_click_channel, self.audio_offset_ms));
         for p in &self.recent {
             out.push_str(&format!("recent={}\n", p.display()));
         }

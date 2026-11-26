@@ -950,6 +950,11 @@ pub struct Engine {
     amp_dsp: AmpDsp,
     amp_l: Vec<f32>,
     amp_r: Vec<f32>,
+    /// Tercer sintetizador solo para los clics del metrónomo y de la cuenta previa: así pueden salir por otra
+    /// salida de audio (monitores) sin mezclarse con la banda.
+    click: Synthesizer,
+    click_l: Vec<f32>,
+    click_r: Vec<f32>,
     rx: Receiver<Cmd>,
     shared: Arc<Shared>,
     timeline: Arc<Timeline>,
@@ -1032,12 +1037,16 @@ impl Engine {
         let settings = SynthesizerSettings::new(sample_rate as i32);
         let synth = Synthesizer::new(&font, &settings).map_err(|e| format!("{e}"))?;
         let amp = Synthesizer::new(&font, &settings).map_err(|e| format!("{e}"))?;
+        let click = Synthesizer::new(&font, &settings).map_err(|e| format!("{e}"))?;
         Ok(Engine {
             synth,
             amp,
             amp_dsp: AmpDsp::new(sample_rate as f32),
             amp_l: vec![0.0; BLOCK],
             amp_r: vec![0.0; BLOCK],
+            click,
+            click_l: vec![0.0; BLOCK],
+            click_r: vec![0.0; BLOCK],
             rx,
             shared,
             timeline: Arc::new(Timeline::default()),
@@ -1066,6 +1075,7 @@ impl Engine {
     fn silence(&mut self, immediate: bool) {
         self.synth.note_off_all(immediate);
         self.amp.note_off_all(immediate);
+        self.click.note_off_all(immediate);
         self.amp_dsp.reset();
         for ch in 0..16 {
             self.all(ch, 0xE0, 0, 64);
@@ -1180,6 +1190,7 @@ impl Engine {
                 self.playing = false;
                 self.synth.note_off_all(false);
                 self.amp.note_off_all(false);
+                self.click.note_off_all(false);
             }
             Cmd::Stop => {
                 self.lead = None;
@@ -1196,6 +1207,7 @@ impl Engine {
             Cmd::SetVolume(v) => {
                 self.synth.set_master_volume(v.clamp(0.0, 2.0));
                 self.amp.set_master_volume(v.clamp(0.0, 2.0));
+                self.click.set_master_volume(v.clamp(0.0, 2.0));
             }
         }
     }
@@ -1203,9 +1215,17 @@ impl Engine {
     fn fire(&mut self, ev: Event, mask: u64, metronome: bool) {
         let ch = ev.channel as i32;
         let amped = self.amped(ev.track);
+        if ev.track == METRONOME_TRACK {
+            match ev.kind {
+                Kind::NoteOn { key, velocity } if metronome => self.click.note_on(ch, key as i32, velocity as i32),
+                Kind::NoteOff { key } => self.click.note_off(ch, key as i32),
+                _ => {}
+            }
+            return;
+        }
         match ev.kind {
             Kind::NoteOn { key, velocity } => {
-                let enabled = if ev.track == METRONOME_TRACK { metronome } else { ev.track >= 64 || mask & (1u64 << ev.track) != 0 };
+                let enabled = ev.track >= 64 || mask & (1u64 << ev.track) != 0;
                 if enabled {
                     // Ganancia por pista (mixer de la interfaz), en porcentaje.
                     let gain = self.shared.gains.get(ev.track as usize).map(|g| g.load(Ordering::Relaxed) as i32).unwrap_or(100);
@@ -1246,7 +1266,18 @@ impl Engine {
         }
     }
 
+    /// Genera audio con los clics del metrónomo mezclados en la salida.
     pub fn render(&mut self, left: &mut [f32], right: &mut [f32]) {
+        self.render_inner(left, right, None);
+    }
+
+    /// Como `render`, pero los clics (metrónomo y cuenta previa) salen aparte en `click_l`/`click_r`
+    /// (deben tener el mismo largo que `left`) para mandarlos a otra salida de audio.
+    pub fn render_split(&mut self, left: &mut [f32], right: &mut [f32], click_l: &mut [f32], click_r: &mut [f32]) {
+        self.render_inner(left, right, Some((click_l, click_r)));
+    }
+
+    fn render_inner(&mut self, left: &mut [f32], right: &mut [f32], mut click_out: Option<(&mut [f32], &mut [f32])>) {
         while let Ok(cmd) = self.rx.try_recv() {
             self.handle(cmd);
         }
@@ -1271,13 +1302,13 @@ impl Engine {
                     } else {
                     if let Some((at, key)) = lead.off {
                         if lead.elapsed >= at {
-                            self.synth.note_off(9, key);
+                            self.click.note_off(9, key);
                             lead.off = None;
                         }
                     }
                     if lead.next < lead.beats && lead.elapsed >= lead.next as f64 * lead.beat_secs {
                         let (key, vel) = if lead.next == 0 { (76, 120) } else { (77, 100) };
-                        self.synth.note_on(9, key, vel);
+                        self.click.note_on(9, key, vel);
                         lead.off = Some((lead.elapsed + 0.06, key));
                         lead.next += 1;
                     }
@@ -1328,6 +1359,19 @@ impl Engine {
                 for i in 0..chunk {
                     left[done + i] += self.amp_l[i];
                     right[done + i] += self.amp_r[i];
+                }
+            }
+            self.click.render(&mut self.click_l[..chunk], &mut self.click_r[..chunk]);
+            match click_out.as_mut() {
+                Some((cl, cr)) => {
+                    cl[done..done + chunk].copy_from_slice(&self.click_l[..chunk]);
+                    cr[done..done + chunk].copy_from_slice(&self.click_r[..chunk]);
+                }
+                None => {
+                    for i in 0..chunk {
+                        left[done + i] += self.click_l[i];
+                        right[done + i] += self.click_r[i];
+                    }
                 }
             }
             done += chunk;

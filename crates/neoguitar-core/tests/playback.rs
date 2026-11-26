@@ -244,6 +244,34 @@ fn render_guitar_solo() {
 }
 
 #[test]
+fn click_goes_to_its_own_output_when_split() {
+    let sf = format!("{}/soundfonts/GeneralUser-GS.sf2", concat!(env!("CARGO_MANIFEST_DIR"), "/../.."));
+    let Ok(mut file) = std::fs::File::open(&sf) else {
+        eprintln!("sin SoundFont, se omite");
+        return;
+    };
+    let font = Arc::new(SoundFont::new(&mut file).unwrap());
+    let song = load_or_skip!("nirvana-breed_9.gp5");
+    let tl = Arc::new(Timeline::build(&song));
+    let (tx, rx) = channel();
+    let shared = Arc::new(Shared::default());
+    shared.mask.store(u64::MAX, Ordering::Relaxed);
+    let mut engine = Engine::new(font, 44100, shared, rx).unwrap();
+    tx.send(Cmd::SetTimeline(tl)).unwrap();
+    tx.send(Cmd::PlayCountIn { beats: 4, beat_secs: 0.5, delay: 0.0 }).unwrap();
+    let (mut l, mut r, mut cl, mut cr) = (vec![0f32; 512], vec![0f32; 512], vec![0f32; 512], vec![0f32; 512]);
+    let (mut main_peak, mut click_peak) = (0f32, 0f32);
+    for _ in 0..(1.8 * 44100.0) as usize / 512 {
+        engine.render_split(&mut l, &mut r, &mut cl, &mut cr);
+        main_peak = l.iter().chain(&r).fold(main_peak, |p, v| p.max(v.abs()));
+        click_peak = cl.iter().chain(&cr).fold(click_peak, |p, v| p.max(v.abs()));
+    }
+    println!("separado: banda {main_peak:.4}, metrónomo {click_peak:.3}");
+    assert!(click_peak > 0.02, "la cuenta debe sonar en la salida del metrónomo");
+    assert!(main_peak < 0.001, "la banda no debe llevar los clics: {main_peak}");
+}
+
+#[test]
 fn count_in_and_trainer() {
     let sf = format!("{}/soundfonts/GeneralUser-GS.sf2", concat!(env!("CARGO_MANIFEST_DIR"), "/../.."));
     let Ok(mut file) = std::fs::File::open(&sf) else {

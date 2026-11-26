@@ -1,7 +1,7 @@
 use neoguitar_ui::theme::{self, Icon, IconStyle};
 use neoguitar_ui::tab_view::{self, ViewAction};
 use eframe::egui::{self, Align, Layout, RichText};
-use neoguitar_core::audio::{Player, Status};
+use neoguitar_core::audio::{Outputs, Player, Status};
 use neoguitar_core::lyrics::{self, Lyrics};
 use neoguitar_core::model::{midi_note_name, Song};
 use neoguitar_win::settings::Settings;
@@ -70,6 +70,10 @@ pub struct App {
     update_msg: Option<String>,
     /// Ventana del complemento opcional para buscar tabs en internet.
     tabs: crate::tabs_search::TabsSearch,
+    /// Ventana "Audio output": borrador de las salidas y lista de dispositivos.
+    audio_open: bool,
+    audio_draft: Outputs,
+    audio_devices: Vec<String>,
 }
 
 /// Letra cargada y sus puntos de sincronización: (tiempo de la letra, tiempo de la tablatura).
@@ -134,6 +138,16 @@ impl App {
             update_dl: None,
             update_msg: None,
             tabs: Default::default(),
+            audio_open: false,
+            audio_draft: Outputs::default(),
+            audio_devices: Vec::new(),
+        };
+        // Salidas de audio guardadas (antes de que termine de cargar el SoundFont y se abra el dispositivo).
+        app.player.outputs = Outputs {
+            main: app.settings.audio_main.clone(),
+            click: app.settings.audio_click.clone(),
+            click_channel: app.settings.audio_click_channel,
+            offset_ms: app.settings.audio_offset_ms,
         };
         // Consulta de versión nueva: una vez al día como máximo y nunca en las corridas de captura.
         if (persist || std::env::var_os("NEOGUITAR_CURRENT_VERSION").is_some()) && app.settings.check_updates && unix_now().saturating_sub(app.settings.last_update_check) >= 86_400 {
@@ -259,7 +273,71 @@ impl App {
         if let Status::Ready(p) = &self.player.status {
             s.soundfont = Some(p.clone());
         }
+        let o = &self.player.outputs;
+        s.audio_main = o.main.clone();
+        s.audio_click = o.click.clone();
+        s.audio_click_channel = o.click_channel;
+        s.audio_offset_ms = o.offset_ms;
         s
+    }
+
+    /// Ventana para elegir el dispositivo de la banda y el del metrónomo (monitores).
+    fn audio_window(&mut self, ctx: &egui::Context) {
+        if !self.audio_open {
+            return;
+        }
+        let mut open = true;
+        let mut apply = false;
+        let mut close = false;
+        egui::Window::new("Audio output").open(&mut open).collapsible(false).resizable(false).show(ctx, |ui| {
+            let devices = self.audio_devices.clone();
+            let combo = |ui: &mut egui::Ui, id: &str, value: &mut Option<String>, none_label: &str| {
+                let shown = value.clone().unwrap_or_else(|| none_label.to_string());
+                egui::ComboBox::from_id_salt(id).width(300.0).selected_text(shown).show_ui(ui, |ui| {
+                    ui.selectable_value(value, None, none_label);
+                    for d in &devices {
+                        ui.selectable_value(value, Some(d.clone()), d);
+                    }
+                });
+            };
+            ui.label("Band (the tracks)");
+            combo(ui, "audio_main", &mut self.audio_draft.main, "Windows default");
+            ui.add_space(6.0);
+            ui.label("Metronome and count-in only");
+            combo(ui, "audio_click", &mut self.audio_draft.click, "Same output as the band");
+            if self.audio_draft.click.is_some() {
+                ui.horizontal(|ui| {
+                    ui.label("Channels");
+                    let mut pair = self.audio_draft.click_channel / 2;
+                    ui.add(egui::DragValue::new(&mut pair).range(0..=15).custom_formatter(|n, _| format!("{}-{}", n as u32 * 2 + 1, n as u32 * 2 + 2)).speed(0.1));
+                    self.audio_draft.click_channel = pair * 2;
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Sync offset");
+                    ui.add(egui::Slider::new(&mut self.audio_draft.offset_ms, -300..=300).suffix(" ms"));
+                });
+                ui.label(RichText::new("Two different devices have different delays. If the click is late compared to the band, use a negative value; if it is early, a positive one.").size(11.0).color(theme::MUTED));
+                ui.label(RichText::new("For a multi-output interface, pick the same device in both and choose its other channel pair for the metronome.").size(11.0).color(theme::MUTED));
+            }
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                if ui.button("Apply").on_hover_text("Reopens the audio (playback stops)").clicked() {
+                    apply = true;
+                }
+                if ui.button("Close").clicked() {
+                    close = true;
+                }
+            });
+            if let Status::Error(e) = &self.player.status {
+                ui.colored_label(theme::DANGER, e);
+            }
+        });
+        if apply {
+            self.player.set_outputs(self.audio_draft.clone());
+        }
+        if !open || close {
+            self.audio_open = false;
+        }
     }
 
     fn persist_settings(&mut self) {
@@ -763,6 +841,12 @@ impl App {
                         self.pick_soundfont();
                         ui.close();
                     }
+                    if ui.button("Audio output…").on_hover_text("Choose the output device, and a separate one for the metronome (monitors)").clicked() {
+                        self.audio_devices = neoguitar_core::audio::output_devices();
+                        self.audio_draft = self.player.outputs.clone();
+                        self.audio_open = true;
+                        ui.close();
+                    }
                     #[cfg(windows)]
                     {
                         let tip = "Open .gp3, .gp4, .gp5, .gpx and .gp files with NeoGuitar when double-clicked";
@@ -990,6 +1074,7 @@ impl eframe::App for App {
         if let Some(p) = self.tabs.show(&ctx) {
             self.open(&p);
         }
+        self.audio_window(&ctx);
         self.player.sync_speed();
         self.persist_settings();
         if matches!(self.player.status, Status::Loading(_)) {

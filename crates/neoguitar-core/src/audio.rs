@@ -5,9 +5,10 @@ use crate::playback::{Cmd, Engine, Shared, Timeline, MIX_FILE};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use rustysynth::SoundFont;
 use std::path::{Path, PathBuf};
+use std::collections::VecDeque;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::{channel, Receiver, Sender};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 pub enum Status {
     /// No se encontró ningún SoundFont.
@@ -17,8 +18,50 @@ pub enum Status {
     Error(String),
 }
 
+/// Salidas de audio elegidas. `None` = el dispositivo predeterminado del sistema (principal) o "mezclado con
+/// la banda" (metrónomo).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Outputs {
+    /// Nombre del dispositivo de la banda.
+    pub main: Option<String>,
+    /// Dispositivo solo para el metrónomo y la cuenta previa (p. ej. los monitores de los músicos).
+    pub click: Option<String>,
+    /// Primer canal (base 0) del par por el que sale el metrónomo, para interfaces con varias salidas.
+    pub click_channel: u32,
+    /// Ajuste de sincronía en ms (-300..300): positivo retrasa el metrónomo, negativo retrasa la banda.
+    pub offset_ms: i32,
+}
+
+/// Nombres de los dispositivos de salida disponibles.
+pub fn output_devices() -> Vec<String> {
+    let host = cpal::default_host();
+    let mut names: Vec<String> = host.output_devices().map(|it| it.filter_map(|d| device_name(&d)).collect()).unwrap_or_default();
+    names.dedup();
+    names
+}
+
+fn device_name(d: &cpal::Device) -> Option<String> {
+    d.description().ok().map(|x| x.name().to_string())
+}
+
+fn pick_device(host: &cpal::Host, name: Option<&str>) -> Result<cpal::Device, String> {
+    match name {
+        None => host.default_output_device().ok_or_else(|| "no audio output device".to_string()),
+        Some(n) => host
+            .output_devices()
+            .map_err(|e| format!("audio devices: {e}"))?
+            .find(|d| device_name(d).as_deref() == Some(n))
+            .ok_or_else(|| format!("audio device not found: {n}")),
+    }
+}
+
+/// Cola de fotogramas entre el motor (callback de la banda) y la salida del metrónomo.
+type ClickQueue = Arc<Mutex<VecDeque<(f32, f32)>>>;
+
 pub struct Player {
     pub status: Status,
+    pub outputs: Outputs,
+    click_stream: Option<cpal::Stream>,
     pub shared: Arc<Shared>,
     pub timeline: Arc<Timeline>,
     /// Línea de tiempo sin transponer, de la que sale `timeline`.
@@ -48,6 +91,8 @@ impl Player {
         shared.mask.store(u64::MAX, Ordering::Relaxed);
         let mut p = Player {
             status: Status::NoSoundFont,
+            outputs: Outputs::default(),
+            click_stream: None,
             shared,
             timeline: Arc::new(Timeline::default()),
             base_timeline: Arc::new(Timeline::default()),
@@ -71,6 +116,7 @@ impl Player {
 
     pub fn load_soundfont(&mut self, path: &Path) {
         self.stream = None; // detiene el motor anterior
+        self.click_stream = None;
         self.font = None;
         self.shared.playing.store(false, Ordering::Relaxed);
         self.status = Status::Loading(path.to_path_buf());
@@ -101,13 +147,26 @@ impl Player {
     fn start_stream(&mut self, font: Arc<SoundFont>) -> Result<(), String> {
         self.font = Some(font.clone());
         let host = cpal::default_host();
-        let device = host.default_output_device().ok_or("no audio output device")?;
+        let device = pick_device(&host, self.outputs.main.as_deref())?;
         let config = device.default_output_config().map_err(|e| format!("audio configuration: {e}"))?;
         if config.sample_format() != cpal::SampleFormat::F32 {
             return Err(format!("unsupported audio format: {:?}", config.sample_format()));
         }
         let channels = config.channels() as usize;
         let sample_rate: u32 = config.sample_rate().into();
+
+        // Salida aparte del metrónomo (monitores), si se eligió.
+        let click_dev = match &self.outputs.click {
+            Some(name) => {
+                let d = pick_device(&host, Some(name))?;
+                let c = d.default_output_config().map_err(|e| format!("audio configuration ({name}): {e}"))?;
+                if c.sample_format() != cpal::SampleFormat::F32 {
+                    return Err(format!("unsupported audio format on {name}: {:?}", c.sample_format()));
+                }
+                Some((d, c))
+            }
+            None => None,
+        };
 
         // Se crea un canal nuevo para el motor nuevo y se reenvía el estado actual.
         let (tx, rx) = channel();
@@ -117,7 +176,26 @@ impl Player {
         let _ = tx.send(Cmd::SetVolume(self.volume));
         self.tx = tx;
 
+        // Sincronía entre las dos salidas: positivo retrasa el metrónomo, negativo retrasa la banda.
+        let offset = self.outputs.offset_ms.clamp(-300, 300);
+        let queue: ClickQueue = Arc::new(Mutex::new(VecDeque::new()));
+        let click_rate = click_dev.as_ref().map(|(_, c)| u32::from(c.sample_rate())).unwrap_or(sample_rate);
+        // Colchón fijo de ~15 ms para que el reloj de la otra salida no deje la cola vacía a cada rato.
+        let jitter = (click_rate as usize * 15) / 1000;
+        let click_delay = jitter + (offset.max(0) as usize * click_rate as usize) / 1000;
+        let main_delay = (-offset).max(0) as usize * sample_rate as usize / 1000;
+        let split = click_dev.is_some();
+        if split {
+            queue.lock().unwrap().extend(std::iter::repeat_n((0.0, 0.0), click_delay));
+        }
+        let mut main_line: VecDeque<(f32, f32)> = std::iter::repeat_n((0.0, 0.0), main_delay).collect();
+
+        let step = sample_rate as f64 / click_rate as f64;
+        let (mut phase, mut prev) = (0.0f64, (0.0f32, 0.0f32));
+        let cap = click_delay + click_rate as usize / 4;
+        let producer = queue.clone();
         let (mut left, mut right) = (Vec::<f32>::new(), Vec::<f32>::new());
+        let (mut cl, mut cr) = (Vec::<f32>::new(), Vec::<f32>::new());
         let stream = device
             .build_output_stream(
                 config.into(),
@@ -125,7 +203,36 @@ impl Player {
                     let frames = data.len() / channels.max(1);
                     left.resize(frames, 0.0);
                     right.resize(frames, 0.0);
-                    engine.render(&mut left, &mut right);
+                    if split {
+                        cl.resize(frames, 0.0);
+                        cr.resize(frames, 0.0);
+                        engine.render_split(&mut left, &mut right, &mut cl, &mut cr);
+                        if let Ok(mut q) = producer.lock() {
+                            for i in 0..frames {
+                                let x = (cl[i], cr[i]);
+                                // Remuestreo lineal si los relojes de las dos salidas difieren.
+                                while phase < 1.0 {
+                                    let p = phase as f32;
+                                    q.push_back((prev.0 + (x.0 - prev.0) * p, prev.1 + (x.1 - prev.1) * p));
+                                    phase += step;
+                                }
+                                phase -= 1.0;
+                                prev = x;
+                            }
+                            let extra = q.len().saturating_sub(cap);
+                            q.drain(..extra);
+                        }
+                    } else {
+                        engine.render(&mut left, &mut right);
+                    }
+                    for i in 0..frames {
+                        if main_delay > 0 {
+                            main_line.push_back((left[i], right[i]));
+                            let (l, r) = main_line.pop_front().unwrap_or((0.0, 0.0));
+                            left[i] = l;
+                            right[i] = r;
+                        }
+                    }
                     for (i, frame) in data.chunks_mut(channels.max(1)).enumerate() {
                         frame[0] = left[i];
                         if channels > 1 {
@@ -140,9 +247,61 @@ impl Player {
                 None,
             )
             .map_err(|e| format!("could not open audio: {e}"))?;
+
+        // Salida del metrónomo: toma de la cola lo que el motor va produciendo.
+        let click_stream = match click_dev {
+            Some((dev, cfg)) => {
+                let cch = cfg.channels() as usize;
+                let first = (self.outputs.click_channel as usize).min(cch.saturating_sub(1));
+                let consumer = queue;
+                let s = dev
+                    .build_output_stream(
+                        cfg.into(),
+                        move |data: &mut [f32], _| {
+                            let mut q = consumer.lock().ok();
+                            for frame in data.chunks_mut(cch.max(1)) {
+                                frame.iter_mut().for_each(|x| *x = 0.0);
+                                let (l, r) = q.as_mut().and_then(|q| q.pop_front()).unwrap_or((0.0, 0.0));
+                                frame[first] = l;
+                                if first + 1 < frame.len() {
+                                    frame[first + 1] = r;
+                                }
+                            }
+                        },
+                        |e| eprintln!("metronome audio error: {e}"),
+                        None,
+                    )
+                    .map_err(|e| format!("could not open the metronome output: {e}"))?;
+                s.play().map_err(|e| format!("could not start the metronome output: {e}"))?;
+                Some(s)
+            }
+            None => None,
+        };
         stream.play().map_err(|e| format!("could not start audio: {e}"))?;
         self.stream = Some(stream);
+        self.click_stream = click_stream;
         Ok(())
+    }
+
+    /// Cambia los dispositivos de salida y reabre el audio (la reproducción se detiene).
+    pub fn set_outputs(&mut self, outputs: Outputs) {
+        if outputs == self.outputs {
+            return;
+        }
+        self.outputs = outputs;
+        let Some(font) = self.font.clone() else { return };
+        let path = match &self.status {
+            Status::Ready(p) => p.clone(),
+            Status::Error(_) => PathBuf::new(),
+            _ => return,
+        };
+        self.stream = None;
+        self.click_stream = None;
+        self.shared.playing.store(false, Ordering::Relaxed);
+        self.status = match self.start_stream(font) {
+            Ok(()) => Status::Ready(path),
+            Err(e) => Status::Error(e),
+        };
     }
 
     pub fn ready(&self) -> bool {
