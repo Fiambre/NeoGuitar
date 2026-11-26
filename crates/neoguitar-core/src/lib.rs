@@ -6,6 +6,7 @@ pub mod model;
 pub mod gm;
 pub mod lyrics;
 pub mod playback;
+pub mod playlist;
 
 use std::path::Path;
 

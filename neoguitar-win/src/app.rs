@@ -3,6 +3,7 @@ use neoguitar_ui::tab_view::{self, ViewAction};
 use eframe::egui::{self, Align, Layout, RichText};
 use neoguitar_core::audio::{Outputs, Player, Status};
 use neoguitar_core::lyrics::{self, Lyrics};
+use neoguitar_core::playlist::{Entry, Playlist};
 use neoguitar_core::model::{midi_note_name, Song};
 use neoguitar_win::settings::Settings;
 use neoguitar_win::update::{self, Release};
@@ -74,6 +75,13 @@ pub struct App {
     audio_open: bool,
     audio_draft: Outputs,
     audio_devices: Vec<String>,
+    /// Playlist de ensayo: cada tab con su propia configuración.
+    playlist: Playlist,
+    playlist_path: Option<PathBuf>,
+    playlist_open: bool,
+    /// Elemento de la playlist que está cargado.
+    playlist_at: Option<usize>,
+    playlist_msg: Option<String>,
 }
 
 /// Letra cargada y sus puntos de sincronización: (tiempo de la letra, tiempo de la tablatura).
@@ -141,7 +149,19 @@ impl App {
             audio_open: false,
             audio_draft: Outputs::default(),
             audio_devices: Vec::new(),
+            playlist: Playlist::default(),
+            playlist_path: None,
+            playlist_open: false,
+            playlist_at: None,
+            playlist_msg: None,
         };
+        // Última playlist usada.
+        if let Some(p) = app.settings.playlist.clone() {
+            if let Ok(pl) = Playlist::load(&p) {
+                app.playlist = pl;
+                app.playlist_path = Some(p);
+            }
+        }
         // Salidas de audio guardadas (antes de que termine de cargar el SoundFont y se abra el dispositivo).
         app.player.outputs = Outputs {
             main: app.settings.audio_main.clone(),
@@ -273,12 +293,224 @@ impl App {
         if let Status::Ready(p) = &self.player.status {
             s.soundfont = Some(p.clone());
         }
+        s.playlist = self.playlist_path.clone();
         let o = &self.player.outputs;
         s.audio_main = o.main.clone();
         s.audio_click = o.click.clone();
         s.audio_click_channel = o.click_channel;
         s.audio_offset_ms = o.offset_ms;
         s
+    }
+
+    /// Configuración actual de la tab abierta (pistas que suenan, volúmenes, velocidad, metrónomo, bucle…).
+    fn capture_entry(&self) -> Option<Entry> {
+        let path = self.path.clone()?;
+        let song = self.song.as_ref()?;
+        let mut e = Entry::new(path);
+        e.mask = self.player.shared.mask.load(std::sync::atomic::Ordering::Relaxed);
+        e.gains = (0..song.tracks.len().min(64)).map(|t| (t, self.player.track_gain(t))).filter(|&(_, g)| g != 100).collect();
+        e.speed = (self.player.speed * 100.0).round() as u32;
+        e.metronome = self.player.metronome();
+        e.count_in = self.count_in;
+        e.loop_measures = self.player.loop_measures;
+        e.transpose = self.player.transpose;
+        Some(e)
+    }
+
+    /// Abre la tab del elemento `i` y le aplica su configuración.
+    fn play_entry(&mut self, i: usize) {
+        let Some(e) = self.playlist.entries.get(i).cloned() else { return };
+        self.open(&e.path);
+        if self.path.as_deref() != Some(e.path.as_path()) {
+            return; // no se pudo abrir: el error ya está en pantalla
+        }
+        self.playlist_at = Some(i);
+        self.player.shared.mask.store(e.mask, std::sync::atomic::Ordering::Relaxed);
+        for (t, g) in &e.gains {
+            self.player.set_track_gain(*t, *g);
+        }
+        self.player.set_speed(e.speed as f32 / 100.0);
+        self.player.set_metronome(e.metronome);
+        self.count_in = e.count_in;
+        self.player.set_transpose(e.transpose);
+        if let Some((a, b)) = e.loop_measures {
+            self.player.set_loop(a, b);
+        }
+        // La pista que se ve: la primera que suena.
+        if let Some(t) = (0..64).find(|&t| e.mask & (1u64 << t) != 0) {
+            if self.song.as_ref().is_some_and(|s| t < s.tracks.len()) {
+                self.track = t;
+            }
+        }
+    }
+
+    fn save_playlist(&mut self) {
+        let Some(p) = self.playlist_path.clone() else { return };
+        self.playlist_msg = self.playlist.save(&p).err();
+    }
+
+    fn playlist_window(&mut self, ctx: &egui::Context) {
+        if !self.playlist_open {
+            return;
+        }
+        let mut open = true;
+        let (mut play, mut remove, mut update, mut up, mut down) = (None, None, None, None, None);
+        let (mut add, mut new, mut load, mut save_as) = (false, false, false, false);
+        let mut changed = false;
+        let total = self.song.as_ref().map(|s| s.tracks.len()).unwrap_or(0);
+        egui::Window::new("Rehearsal playlist").open(&mut open).default_width(460.0).show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                ui.label("Name");
+                changed |= ui.text_edit_singleline(&mut self.playlist.name).changed();
+            });
+            ui.label(
+                RichText::new(match &self.playlist_path {
+                    Some(p) => p.display().to_string(),
+                    None => "Not saved yet: use “Save as…” to get a file you can copy to another PC".to_string(),
+                })
+                .size(11.0)
+                .color(theme::MUTED),
+            );
+            ui.separator();
+            if self.playlist.entries.is_empty() {
+                ui.weak("Empty. Open a tab, set up which tracks play, the speed and the metronome, then press “Add current tab”.");
+            }
+            egui::ScrollArea::vertical().max_height(320.0).auto_shrink([true, true]).show(ui, |ui| {
+                let n = self.playlist.entries.len();
+                for i in 0..n {
+                    let current = self.playlist_at == Some(i);
+                    let same_song = self.path.as_deref() == Some(self.playlist.entries[i].path.as_path());
+                    ui.horizontal(|ui| {
+                        let e = &self.playlist.entries[i];
+                        let tracks = if same_song && total > 0 { format!("{}/{} tracks", e.active_tracks(total), total) } else { format!("{} tracks off", (0..64).filter(|&t| e.mask & (1u64 << t) == 0 && e.mask != u64::MAX).count()) };
+                        let mut label = RichText::new(format!("{}. {}", i + 1, e.title()));
+                        if current {
+                            label = label.strong().color(theme::ACCENT);
+                        }
+                        if ui.add(egui::Button::new(label).frame(false)).on_hover_text(e.path.display().to_string()).clicked() {
+                            play = Some(i);
+                        }
+                        ui.label(RichText::new(format!("{} · {}%{}{}", if e.mask == u64::MAX { "all tracks".to_string() } else { tracks }, e.speed, if e.metronome { " · metronome" } else { "" }, if e.loop_measures.is_some() { " · loop" } else { "" })).size(11.0).color(theme::MUTED));
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            if ui.small_button("✕").on_hover_text("Remove from the playlist").clicked() {
+                                remove = Some(i);
+                            }
+                            if ui.add_enabled(i + 1 < n, egui::Button::new("▼").small()).clicked() {
+                                down = Some(i);
+                            }
+                            if ui.add_enabled(i > 0, egui::Button::new("▲").small()).clicked() {
+                                up = Some(i);
+                            }
+                            if ui.add_enabled(same_song, egui::Button::new("Update").small()).on_hover_text("Save the current setup of this tab into the entry").on_disabled_hover_text("Open this tab first").clicked() {
+                                update = Some(i);
+                            }
+                        });
+                    });
+                    let e = &mut self.playlist.entries[i];
+                    changed |= ui.add(egui::TextEdit::singleline(&mut e.note).hint_text("note…").desired_width(f32::INFINITY).font(egui::TextStyle::Small)).changed();
+                    ui.add_space(2.0);
+                }
+            });
+            ui.separator();
+            ui.horizontal_wrapped(|ui| {
+                if ui.add_enabled(self.song.is_some(), egui::Button::new("Add current tab")).on_hover_text("Adds the open tab with its tracks, volumes, speed, metronome and loop").clicked() {
+                    add = true;
+                }
+                if ui.add_enabled(self.playlist_at.is_some_and(|i| i > 0), egui::Button::new("◀ Previous")).clicked() {
+                    play = self.playlist_at.map(|i| i - 1);
+                }
+                if ui.add_enabled(self.playlist_at.is_some_and(|i| i + 1 < self.playlist.entries.len()) || (self.playlist_at.is_none() && !self.playlist.entries.is_empty()), egui::Button::new("Next ▶")).clicked() {
+                    play = Some(self.playlist_at.map(|i| i + 1).unwrap_or(0));
+                }
+            });
+            ui.horizontal_wrapped(|ui| {
+                if ui.button("New").clicked() {
+                    new = true;
+                }
+                if ui.button("Open…").clicked() {
+                    load = true;
+                }
+                if ui.add_enabled(self.playlist_path.is_some(), egui::Button::new("Save")).clicked() {
+                    self.save_playlist();
+                }
+                if ui.button("Save as…").clicked() {
+                    save_as = true;
+                }
+            });
+            if let Some(m) = &self.playlist_msg {
+                ui.colored_label(theme::DANGER, m);
+            }
+        });
+        if !open {
+            self.playlist_open = false;
+        }
+        if add {
+            if let Some(e) = self.capture_entry() {
+                self.playlist.entries.push(e);
+                self.playlist_at = Some(self.playlist.entries.len() - 1);
+                changed = true;
+            }
+        }
+        if let Some(i) = update {
+            if let Some(mut e) = self.capture_entry() {
+                e.note = self.playlist.entries[i].note.clone();
+                self.playlist.entries[i] = e;
+                changed = true;
+            }
+        }
+        if let Some(i) = remove {
+            self.playlist.entries.remove(i);
+            self.playlist_at = match self.playlist_at {
+                Some(c) if c == i => None,
+                Some(c) if c > i => Some(c - 1),
+                other => other,
+            };
+            changed = true;
+        }
+        if let Some(i) = up {
+            self.playlist.entries.swap(i, i - 1);
+            self.playlist_at = self.playlist_at.map(|c| if c == i { i - 1 } else if c == i - 1 { i } else { c });
+            changed = true;
+        }
+        if let Some(i) = down {
+            self.playlist.entries.swap(i, i + 1);
+            self.playlist_at = self.playlist_at.map(|c| if c == i { i + 1 } else if c == i + 1 { i } else { c });
+            changed = true;
+        }
+        if let Some(i) = play {
+            self.play_entry(i);
+        }
+        if new {
+            self.playlist = Playlist::default();
+            self.playlist_path = None;
+            self.playlist_at = None;
+            self.playlist_msg = None;
+        }
+        if load {
+            if let Some(p) = rfd::FileDialog::new().add_filter("NeoGuitar playlist", &["ngpl"]).pick_file() {
+                match Playlist::load(&p) {
+                    Ok(pl) => {
+                        self.playlist = pl;
+                        self.playlist_path = Some(p);
+                        self.playlist_at = None;
+                        self.playlist_msg = None;
+                    }
+                    Err(e) => self.playlist_msg = Some(e),
+                }
+            }
+        }
+        if save_as {
+            let name = if self.playlist.name.trim().is_empty() { "playlist".to_string() } else { self.playlist.name.trim().to_string() };
+            if let Some(p) = rfd::FileDialog::new().add_filter("NeoGuitar playlist", &["ngpl"]).set_file_name(format!("{name}.ngpl")).save_file() {
+                self.playlist_path = Some(p);
+                self.save_playlist();
+                changed = false;
+            }
+        }
+        // Guardado automático de los cambios cuando la playlist ya tiene archivo.
+        if changed {
+            self.save_playlist();
+        }
     }
 
     /// Ventana para elegir el dispositivo de la banda y el del metrónomo (monitores).
@@ -825,6 +1057,10 @@ impl App {
                         ui.close();
                     }
                     ui.separator();
+                    if ui.button("Rehearsal playlist…").on_hover_text("A list of tabs, each with its own tracks, volumes, speed and metronome").clicked() {
+                        self.playlist_open = true;
+                        ui.close();
+                    }
                     if ui.button("Find tabs online…").on_hover_text("Optional plugin").clicked() {
                         self.tabs.show_window();
                         ui.close();
@@ -1075,6 +1311,7 @@ impl eframe::App for App {
             self.open(&p);
         }
         self.audio_window(&ctx);
+        self.playlist_window(&ctx);
         self.player.sync_speed();
         self.persist_settings();
         if matches!(self.player.status, Status::Loading(_)) {
