@@ -78,8 +78,7 @@ pub struct App {
     /// Playlist de ensayo: cada tab con su propia configuración.
     playlist: Playlist,
     playlist_path: Option<PathBuf>,
-    playlist_open: bool,
-    /// Barra inferior de la playlist activada.
+    /// Panel lateral de la playlist visible.
     playlist_on: bool,
     /// Elemento de la playlist que está cargado.
     playlist_at: Option<usize>,
@@ -153,7 +152,6 @@ impl App {
             audio_devices: Vec::new(),
             playlist: Playlist::default(),
             playlist_path: None,
-            playlist_open: false,
             playlist_on: false,
             playlist_at: None,
             playlist_msg: None,
@@ -356,167 +354,123 @@ impl App {
         }
     }
 
-    /// Barra inferior "Playlist": una casilla para activarla y, activa, las tabs como pestañas.
-    fn playlist_bar(&mut self, ui: &mut egui::Ui) {
-        let (mut play, mut add, mut manage) = (None, false, false);
-        let n = self.playlist.entries.len();
-        ui.horizontal(|ui| {
-            ui.checkbox(&mut self.playlist_on, RichText::new("Playlist").strong()).on_hover_text("Tabs for rehearsal, each remembering its tracks, volumes, speed and metronome");
-            if !self.playlist_on {
-                return;
-            }
-            ui.separator();
-            if ui.add_enabled(self.playlist_at.is_some_and(|i| i > 0), egui::Button::new("Prev")).on_hover_text("Previous tab").clicked() {
-                play = self.playlist_at.map(|i| i - 1);
-            }
-            if ui.add_enabled(self.playlist_at.is_some_and(|i| i + 1 < n) || (self.playlist_at.is_none() && n > 0), egui::Button::new("Next")).on_hover_text("Next tab").clicked() {
-                play = Some(self.playlist_at.map(|i| i + 1).unwrap_or(0));
-            }
-            ui.separator();
-            // Más a la derecha: acciones fijas. El resto del ancho es para las tabs, con desplazamiento horizontal.
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if ui.button("Manage…").on_hover_text("Reorder, notes, save and open playlist files").clicked() {
-                    manage = true;
-                }
-                if ui.add_enabled(self.song.is_some(), egui::Button::new("+ Add current tab")).on_hover_text("Adds the open tab with its current tracks, volumes, speed, metronome and loop").clicked() {
-                    add = true;
-                }
-                ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                    if n == 0 {
-                        ui.weak("Open a tab, set it up as you rehearse it and press “+ Add current tab”.");
-                    }
-                    egui::ScrollArea::horizontal().auto_shrink([false, true]).show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            for (i, e) in self.playlist.entries.iter().enumerate() {
-                                let label = format!("{}. {}", i + 1, e.title());
-                                let mut text = RichText::new(label);
-                                if self.playlist_at == Some(i) {
-                                    text = text.strong().color(theme::ACCENT);
-                                }
-                                if ui.selectable_label(self.playlist_at == Some(i), text).on_hover_text(format!("{}\n{}% · {}", e.path.display(), e.speed, if e.mask == u64::MAX { "all tracks".to_string() } else { "selected tracks".to_string() })).clicked() {
-                                    play = Some(i);
-                                }
-                            }
-                        });
-                    });
-                });
-            });
-        });
-        if add {
-            if let Some(e) = self.capture_entry() {
-                self.playlist.entries.push(e);
-                self.playlist_at = Some(self.playlist.entries.len() - 1);
-                self.save_playlist();
-            }
-        }
-        if manage {
-            self.playlist_open = true;
-        }
-        if let Some(i) = play {
-            self.play_entry(i);
-        }
-    }
-
     fn save_playlist(&mut self) {
         let Some(p) = self.playlist_path.clone() else { return };
         self.playlist_msg = self.playlist.save(&p).err();
     }
 
-    fn playlist_window(&mut self, ctx: &egui::Context) {
-        if !self.playlist_open {
-            return;
-        }
-        let mut open = true;
+    /// Panel lateral derecho de la playlist, al estilo de la lista de reproducción de un reproductor de video:
+    /// las tabs en orden, la que está cargada resaltada, y aquí mismo se arma y se guarda.
+    fn playlist_panel(&mut self, ui: &mut egui::Ui) {
+        theme::section(ui, "Playlist");
         let (mut play, mut remove, mut update, mut up, mut down) = (None, None, None, None, None);
         let (mut add, mut new, mut load, mut save_as) = (false, false, false, false);
         let mut changed = false;
+        let n = self.playlist.entries.len();
         let total = self.song.as_ref().map(|s| s.tracks.len()).unwrap_or(0);
-        egui::Window::new("Rehearsal playlist").open(&mut open).default_width(460.0).show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                ui.label("Name");
-                changed |= ui.text_edit_singleline(&mut self.playlist.name).changed();
-            });
-            ui.label(
-                RichText::new(match &self.playlist_path {
-                    Some(p) => p.display().to_string(),
-                    None => "Not saved yet: use “Save as…” to get a file you can copy to another PC".to_string(),
-                })
-                .size(11.0)
-                .color(theme::MUTED),
-            );
-            ui.separator();
-            if self.playlist.entries.is_empty() {
-                ui.weak("Empty. Open a tab, set up which tracks play, the speed and the metronome, then press “Add current tab”.");
+
+        changed |= ui.add(egui::TextEdit::singleline(&mut self.playlist.name).hint_text("Playlist name").desired_width(f32::INFINITY)).changed();
+        ui.label(
+            RichText::new(match &self.playlist_path {
+                Some(p) => format!("{n} tabs · {}", p.display()),
+                None => format!("{n} tabs · not saved yet (use “Save as…” to get a file you can copy)"),
+            })
+            .size(11.0)
+            .color(theme::MUTED),
+        );
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            if ui.add_enabled(self.playlist_at.is_some_and(|i| i > 0), egui::Button::new("Prev")).clicked() {
+                play = self.playlist_at.map(|i| i - 1);
             }
-            egui::ScrollArea::vertical().max_height(320.0).auto_shrink([true, true]).show(ui, |ui| {
-                let n = self.playlist.entries.len();
-                for i in 0..n {
-                    let current = self.playlist_at == Some(i);
-                    let same_song = self.path.as_deref() == Some(self.playlist.entries[i].path.as_path());
-                    ui.horizontal(|ui| {
-                        let e = &self.playlist.entries[i];
-                        let tracks = if same_song && total > 0 { format!("{}/{} tracks", e.active_tracks(total), total) } else { format!("{} tracks off", (0..64).filter(|&t| e.mask & (1u64 << t) == 0 && e.mask != u64::MAX).count()) };
-                        let mut label = RichText::new(format!("{}. {}", i + 1, e.title()));
-                        if current {
-                            label = label.strong().color(theme::ACCENT);
-                        }
-                        if ui.add(egui::Button::new(label).frame(false)).on_hover_text(e.path.display().to_string()).clicked() {
-                            play = Some(i);
-                        }
-                        ui.label(RichText::new(format!("{} · {}%{}{}", if e.mask == u64::MAX { "all tracks".to_string() } else { tracks }, e.speed, if e.metronome { " · metronome" } else { "" }, if e.loop_measures.is_some() { " · loop" } else { "" })).size(11.0).color(theme::MUTED));
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if ui.small_button("✕").on_hover_text("Remove from the playlist").clicked() {
-                                remove = Some(i);
-                            }
-                            if ui.add_enabled(i + 1 < n, egui::Button::new("▼").small()).clicked() {
-                                down = Some(i);
-                            }
-                            if ui.add_enabled(i > 0, egui::Button::new("▲").small()).clicked() {
-                                up = Some(i);
-                            }
-                            if ui.add_enabled(same_song, egui::Button::new("Update").small()).on_hover_text("Save the current setup of this tab into the entry").on_disabled_hover_text("Open this tab first").clicked() {
-                                update = Some(i);
-                            }
-                        });
-                    });
-                    let e = &mut self.playlist.entries[i];
-                    changed |= ui.add(egui::TextEdit::singleline(&mut e.note).hint_text("note…").desired_width(f32::INFINITY).font(egui::TextStyle::Small)).changed();
-                    ui.add_space(2.0);
-                }
-            });
-            ui.separator();
-            ui.horizontal_wrapped(|ui| {
-                if ui.add_enabled(self.song.is_some(), egui::Button::new("Add current tab")).on_hover_text("Adds the open tab with its tracks, volumes, speed, metronome and loop").clicked() {
-                    add = true;
-                }
-                if ui.add_enabled(self.playlist_at.is_some_and(|i| i > 0), egui::Button::new("◀ Previous")).clicked() {
-                    play = self.playlist_at.map(|i| i - 1);
-                }
-                if ui.add_enabled(self.playlist_at.is_some_and(|i| i + 1 < self.playlist.entries.len()) || (self.playlist_at.is_none() && !self.playlist.entries.is_empty()), egui::Button::new("Next ▶")).clicked() {
-                    play = Some(self.playlist_at.map(|i| i + 1).unwrap_or(0));
-                }
-            });
-            ui.horizontal_wrapped(|ui| {
-                if ui.button("New").clicked() {
-                    new = true;
-                }
-                if ui.button("Open…").clicked() {
-                    load = true;
-                }
-                if ui.add_enabled(self.playlist_path.is_some(), egui::Button::new("Save")).clicked() {
-                    self.save_playlist();
-                }
-                if ui.button("Save as…").clicked() {
-                    save_as = true;
-                }
-            });
-            if let Some(m) = &self.playlist_msg {
-                ui.colored_label(theme::DANGER, m);
+            if ui.add_enabled(self.playlist_at.is_some_and(|i| i + 1 < n) || (self.playlist_at.is_none() && n > 0), egui::Button::new("Next")).clicked() {
+                play = Some(self.playlist_at.map(|i| i + 1).unwrap_or(0));
+            }
+            if ui.add_enabled(self.song.is_some(), egui::Button::new("+ Add current tab")).on_hover_text("Adds the open tab with its tracks, volumes, speed, metronome and loop as they are now").clicked() {
+                add = true;
             }
         });
-        if !open {
-            self.playlist_open = false;
+        ui.separator();
+
+        if n == 0 {
+            ui.add_space(6.0);
+            ui.label(RichText::new("Empty").strong());
+            ui.label(RichText::new("Open a tab, set it up as you rehearse it (which tracks play, volumes, speed, metronome, loop) and press “+ Add current tab”. Repeat for each song.").size(12.0).color(theme::MUTED));
         }
+        // La lista ocupa el espacio que deja el pie con los botones de archivo.
+        let footer = 74.0;
+        egui::ScrollArea::vertical().auto_shrink([false, false]).max_height((ui.available_height() - footer).max(60.0)).show(ui, |ui| {
+            for i in 0..n {
+                let current = self.playlist_at == Some(i);
+                let same_song = self.path.as_deref() == Some(self.playlist.entries[i].path.as_path());
+                let fill = if current { theme::ACCENT_DIM } else { theme::CARD };
+                egui::Frame::new().fill(fill).corner_radius(8).inner_margin(egui::Margin::symmetric(10, 8)).show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    let e = &self.playlist.entries[i];
+                    let mut summary = if e.mask == u64::MAX {
+                        "all tracks".to_string()
+                    } else if same_song && total > 0 {
+                        format!("{}/{} tracks", e.active_tracks(total), total)
+                    } else {
+                        "selected tracks".to_string()
+                    };
+                    summary.push_str(&format!(" · {}%", e.speed));
+                    if e.metronome {
+                        summary.push_str(" · metronome");
+                    }
+                    if e.count_in {
+                        summary.push_str(" · count-in");
+                    }
+                    if let Some((a, b)) = e.loop_measures {
+                        summary.push_str(&format!(" · loop {}-{}", a + 1, b + 1));
+                    }
+                    if e.transpose != 0 {
+                        summary.push_str(&format!(" · {:+} st", e.transpose));
+                    }
+                    let title = RichText::new(format!("{}{}. {}", if current { "▶ " } else { "" }, i + 1, e.title())).size(14.5).strong();
+                    if ui.add(egui::Label::new(if current { title.color(theme::ACCENT) } else { title }).sense(egui::Sense::click())).on_hover_text(e.path.display().to_string()).clicked() {
+                        play = Some(i);
+                    }
+                    ui.label(RichText::new(summary).size(11.0).color(theme::MUTED));
+                    let e = &mut self.playlist.entries[i];
+                    changed |= ui.add(egui::TextEdit::singleline(&mut e.note).hint_text("note…").desired_width(f32::INFINITY).font(egui::TextStyle::Small)).changed();
+                    ui.horizontal(|ui| {
+                        if ui.add_enabled(same_song, egui::Button::new("Update").small()).on_hover_text("Save the current setup of this tab into the entry").on_disabled_hover_text("Open this tab first (click its name)").clicked() {
+                            update = Some(i);
+                        }
+                        if ui.add_enabled(i > 0, egui::Button::new("▲").small()).clicked() {
+                            up = Some(i);
+                        }
+                        if ui.add_enabled(i + 1 < n, egui::Button::new("▼").small()).clicked() {
+                            down = Some(i);
+                        }
+                        if ui.small_button("✕").on_hover_text("Remove from the playlist").clicked() {
+                            remove = Some(i);
+                        }
+                    });
+                });
+                ui.add_space(4.0);
+            }
+        });
+        ui.separator();
+        ui.horizontal_wrapped(|ui| {
+            if ui.button("New").clicked() {
+                new = true;
+            }
+            if ui.button("Open…").clicked() {
+                load = true;
+            }
+            if ui.add_enabled(self.playlist_path.is_some(), egui::Button::new("Save")).clicked() {
+                self.save_playlist();
+            }
+            if ui.button("Save as…").clicked() {
+                save_as = true;
+            }
+        });
+        if let Some(m) = &self.playlist_msg {
+            ui.colored_label(theme::DANGER, m);
+        }
+
         if add {
             if let Some(e) = self.capture_entry() {
                 self.playlist.entries.push(e);
@@ -1130,11 +1084,6 @@ impl App {
                         ui.close();
                     }
                     ui.separator();
-                    if ui.button("Playlist: manage…").on_hover_text("Reorder, notes, save and open playlist files (the Playlist bar is at the bottom)").clicked() {
-                        self.playlist_on = true;
-                        self.playlist_open = true;
-                        ui.close();
-                    }
                     if ui.button("Find tabs online…").on_hover_text("Optional plugin").clicked() {
                         self.tabs.show_window();
                         ui.close();
@@ -1190,6 +1139,7 @@ impl App {
                 theme::chip(ui, Icon::Sidebar, self.show_side, label("Panel")).on_hover_text("Side panel").clicked().then(|| self.show_side = !self.show_side);
                 theme::chip(ui, Icon::Layers, self.multi, label("Multi-track")).on_hover_text("Show several tracks at once (pick which with the eye icon in the panel)").clicked().then(|| self.multi = !self.multi);
                 theme::chip(ui, Icon::Split, self.split, label("Split")).on_hover_text("Two tracks side by side").clicked().then(|| self.toggle_split());
+                theme::chip(ui, Icon::Playlist, self.playlist_on, label("Playlist")).on_hover_text("Rehearsal playlist: tabs that remember their tracks, volumes, speed and metronome").clicked().then(|| self.playlist_on = !self.playlist_on);
                 theme::chip(ui, Icon::Lyrics, self.show_lyrics, label("Lyrics")).on_hover_text("Lyrics next to the score (search LRCLIB or load a file)").clicked().then(|| self.show_lyrics = !self.show_lyrics);
                 theme::chip(ui, Icon::Fretboard, self.show_fretboard, label("Fretboard")).on_hover_text("Show the sounding notes on the fretboard").clicked().then(|| self.show_fretboard = !self.show_fretboard);
                 theme::chip(ui, Icon::Staff, self.show_staff, label("Staff")).on_hover_text("Standard notation").clicked().then(|| self.show_staff = !self.show_staff);
@@ -1385,7 +1335,6 @@ impl eframe::App for App {
             self.open(&p);
         }
         self.audio_window(&ctx);
-        self.playlist_window(&ctx);
         self.player.sync_speed();
         self.persist_settings();
         if matches!(self.player.status, Status::Loading(_)) {
@@ -1453,9 +1402,9 @@ impl eframe::App for App {
                 self.top_bar(ui);
             });
         }
-        if !self.fullscreen {
-            egui::Panel::bottom("playlist_bar").frame(theme::panel_frame(egui::Margin::symmetric(14, 6))).show_separator_line(true).show(ui, |ui| {
-                self.playlist_bar(ui);
+        if self.playlist_on && !self.fullscreen {
+            egui::Panel::right("playlist").default_size(320.0).size_range(260.0..=480.0).frame(theme::panel_frame(egui::Margin::same(12))).show(ui, |ui| {
+                self.playlist_panel(ui);
             });
         }
         if self.song.is_some() {

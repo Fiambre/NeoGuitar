@@ -166,6 +166,7 @@ pub enum Icon {
     Split,
     Fullscreen,
     Lyrics,
+    Playlist,
     Transpose,
     Sliders,
 }
@@ -308,6 +309,12 @@ pub fn draw_icon(p: &egui::Painter, icon: Icon, c: egui::Pos2, u: f32, fg: Color
             line(&[(-0.9, 0.8), (-1.3, 1.9), (0.2, 0.8)]);
             line(&[(-1.2, -0.8), (1.2, -0.8)]);
             line(&[(-1.2, 0.0), (0.4, 0.0)]);
+        }
+        Icon::Playlist => {
+            line(&[(-2.0, -1.4), (0.3, -1.4)]);
+            line(&[(-2.0, -0.1), (0.3, -0.1)]);
+            line(&[(-2.0, 1.2), (-0.4, 1.2)]);
+            line(&[(0.7, 0.2), (2.0, 1.0), (0.7, 1.8), (0.7, 0.2)]);
         }
         Icon::Fullscreen => {
             line(&[(-2.0, -0.8), (-2.0, -2.0), (-0.8, -2.0)]);
