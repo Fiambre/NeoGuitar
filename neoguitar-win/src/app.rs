@@ -364,7 +364,7 @@ impl App {
     fn playlist_panel(&mut self, ui: &mut egui::Ui) {
         theme::section(ui, "Playlist");
         let (mut play, mut remove, mut update, mut up, mut down) = (None, None, None, None, None);
-        let (mut add, mut new, mut load, mut save_as) = (false, false, false, false);
+        let (mut add, mut new, mut load, mut save_as, mut add_files) = (false, false, false, false, false);
         let mut changed = false;
         let n = self.playlist.entries.len();
         let total = self.song.as_ref().map(|s| s.tracks.len()).unwrap_or(0);
@@ -390,6 +390,9 @@ impl App {
                 add = true;
             }
         });
+        if ui.button("+ Add tab file…").on_hover_text("Browse for Guitar Pro files (you can pick several). They are added with all tracks and normal speed; open each and press Update to set it up").clicked() {
+            add_files = true;
+        }
         ui.separator();
 
         if n == 0 {
@@ -475,6 +478,13 @@ impl App {
             if let Some(e) = self.capture_entry() {
                 self.playlist.entries.push(e);
                 self.playlist_at = Some(self.playlist.entries.len() - 1);
+                changed = true;
+            }
+        }
+        if add_files {
+            let picked = rfd::FileDialog::new().add_filter("Guitar Pro", &["gp3", "gp4", "gp5", "gpx", "gp", "gtp"]).add_filter("All files", &["*"]).pick_files();
+            for p in picked.unwrap_or_default() {
+                self.playlist.entries.push(Entry::new(p));
                 changed = true;
             }
         }
